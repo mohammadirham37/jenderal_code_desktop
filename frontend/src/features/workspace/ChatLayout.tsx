@@ -5,7 +5,6 @@ import { useShallow } from "zustand/react/shallow";
 import {
   FileCode2,
   FileDiff,
-  FilePlus,
   FolderTree,
   GitBranch,
   Globe,
@@ -21,11 +20,12 @@ import {
 import { ChatPanel } from "@/features/chat/ChatPanel";
 import { BrowserPanel } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
+import { ChangesPanel } from "./ChangesPanel";
 import { LazyEditorPane, LazyGitPanel, LazyTerminalPanel, PanelSuspense } from "./lazy";
 import { useApp } from "@/stores/app";
 import { useChat } from "@/stores/chat";
 import { useEditor } from "@/stores/editor";
-import { EmptyState, IconButton } from "@/components/ui";
+import { IconButton } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 import { useResizable } from "./useResizable";
 
@@ -247,79 +247,6 @@ function SessionSidebar() {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-const WRITE_TOOLS: Record<string, "added" | "modified" | "deleted"> = {
-  fs_write: "modified",
-  fs_edit: "modified",
-  fs_delete: "deleted",
-};
-
-/** Files the agent changed in the active session. */
-function ChangesPanel({ onOpen }: { onOpen: () => void }) {
-  const toolRuns = useChat((s) => s.toolRuns);
-  const openFile = useEditor((s) => s.openFile);
-
-  const changes = useMemo(() => {
-    const byPath = new Map<string, { path: string; op: "added" | "modified" | "deleted"; count: number; at: number }>();
-    for (const r of toolRuns) {
-      const op = WRITE_TOOLS[r.tool_name];
-      const path = typeof r.args?.path === "string" ? r.args.path : null;
-      if (!op || !path || r.status !== "success") continue;
-      const prev = byPath.get(path);
-      const created = r.tool_name === "fs_write" && /creat/i.test(r.result_summary ?? "");
-      byPath.set(path, {
-        path,
-        op: op === "deleted" ? "deleted" : prev?.op === "added" || created ? "added" : op,
-        count: (prev?.count ?? 0) + 1,
-        at: r.created_at,
-      });
-    }
-    return [...byPath.values()].sort((a, b) => b.at - a.at);
-  }, [toolRuns]);
-
-  if (changes.length === 0) {
-    return (
-      <EmptyState
-        icon={<FileDiff size={26} />}
-        title="No changes yet"
-        hint="Files the agent creates, edits, or deletes in this conversation appear here."
-      />
-    );
-  }
-
-  const tone = { added: "text-emerald-500", modified: "text-amber-500", deleted: "text-red-500" } as const;
-  const letter = { added: "A", modified: "M", deleted: "D" } as const;
-
-  return (
-    <div className="h-full overflow-y-auto p-2">
-      <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-        {changes.length} file(s) changed by the agent
-      </div>
-      {changes.map((c) => (
-        <button
-          key={c.path}
-          disabled={c.op === "deleted"}
-          onClick={() => {
-            void openFile(c.path).then(onOpen);
-          }}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-neutral-100 disabled:cursor-default disabled:opacity-70 dark:hover:bg-neutral-800/60"
-          title={c.op === "deleted" ? `${c.path} (deleted)` : `Open ${c.path}`}
-        >
-          {c.op === "added" ? (
-            <FilePlus size={13} className={tone[c.op]} />
-          ) : (
-            <FileCode2 size={13} className={tone[c.op]} />
-          )}
-          <span className={`min-w-0 flex-1 truncate font-mono text-[11px] ${c.op === "deleted" ? "line-through" : ""}`}>
-            {c.path}
-          </span>
-          {c.count > 1 && <span className="text-[10px] text-neutral-500">×{c.count}</span>}
-          <span className={`w-3 text-center font-mono text-[10px] font-bold ${tone[c.op]}`}>{letter[c.op]}</span>
-        </button>
-      ))}
     </div>
   );
 }

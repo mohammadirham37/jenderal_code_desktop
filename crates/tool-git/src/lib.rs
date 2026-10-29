@@ -179,7 +179,7 @@ impl GitRepo {
 
     /// Working-tree status (porcelain v1, NUL separated for path safety).
     pub fn status(&self) -> Result<Vec<FileStatus>> {
-        let out = self.git_ro(&["status", "--porcelain=v1", "-z"])?;
+        let out = self.git_ro(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
         let mut result = Vec::new();
         let mut fields = out.split('\0');
         while let Some(field) = fields.next() {
