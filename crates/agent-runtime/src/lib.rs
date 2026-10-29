@@ -1218,13 +1218,21 @@ mod tests {
                 tx: tx_env,
             });
         }
-        rt.set_policy_mode(&session_id, PolicyMode::Yolo).await.unwrap();
-
+        // Balanced allows edits but still asks for git push and secrets.
+        rt.set_policy_mode(&session_id, PolicyMode::Balanced).await.unwrap();
         assert!(matches!(rx_write.try_recv(), Ok(Decision::Approved { .. })));
         assert!(rx_push.try_recv().is_err(), "git push must keep waiting");
         assert!(rx_env.try_recv().is_err(), "sensitive read must keep waiting");
-        let p = rt.pending.lock().unwrap();
-        assert!(p.contains_key("g") && p.contains_key("e") && !p.contains_key("w"));
+        {
+            let p = rt.pending.lock().unwrap();
+            assert!(p.contains_key("g") && p.contains_key("e") && !p.contains_key("w"));
+        }
+
+        // Full access never prompts, so everything still waiting goes through.
+        rt.set_policy_mode(&session_id, PolicyMode::Yolo).await.unwrap();
+        assert!(matches!(rx_push.try_recv(), Ok(Decision::Approved { .. })));
+        assert!(matches!(rx_env.try_recv(), Ok(Decision::Approved { .. })));
+        assert!(rt.pending.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

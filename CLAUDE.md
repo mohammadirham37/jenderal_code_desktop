@@ -50,7 +50,7 @@ Runtime events go through the `EventSink` trait (agent-runtime). `apps/desktop/s
 
 **Security choke points** (keep changes routed through these):
 - Path resolution: `tool-filesystem` `Workspace::resolve` (canonicalize + containment, rejects symlink escape).
-- `permissions`: `is_sensitive_path`; `assess_command` tokenizes shell commands (splits on `; | & && ||`, follows `$(…)`, backticks, `bash -c`, skips wrappers and git global options) and feeds `is_catastrophic_command` (absolute deny) and `is_git_remote_command` (always asks). Balanced asks for every command; Yolo still asks for git remote, `sudo`, download-and-execute, and unparseable commands. Add new rules there with a test, not via substring checks.
+- `permissions`: `is_sensitive_path`; `assess_command` tokenizes shell commands (splits on `; | & && ||`, follows `$(…)`, backticks, `bash -c`, skips wrappers and git global options) and feeds `is_catastrophic_command` (absolute deny) and `is_git_remote_command` (always asks). Balanced asks for every command; Yolo (full access) never prompts: it allows everything except the catastrophic deny-list and writes outside the workspace. Add new rules there with a test, not via substring checks.
 - `tool-filesystem`: `write_no_follow` (O_NOFOLLOW) for all writes; `search`/`glob_files` skip symlinks and `is_sensitive_name` files. Read-only git calls run with `core.fsmonitor=false` and `core.hooksPath` disabled.
 - Agent command execution: `tool-terminal::run_exec` (timeout, output cap, process-group kill). This is separate from the interactive human PTY in `apps/desktop/src/terminal.rs` (portable-pty → xterm.js).
 

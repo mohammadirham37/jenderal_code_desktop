@@ -22,7 +22,7 @@ const ALL_TOOLS = [
 const POLICY_HINT: Record<PolicyMode, string> = {
   safe: "Ask before every file write, deletion, and command (recommended).",
   balanced: "File edits inside the workspace apply immediately; commands and deletions still ask.",
-  yolo: "Everything inside the workspace is auto-approved. Paths outside remain blocked.",
+  yolo: "Always allow: no prompts at all (including git push and sensitive files). Catastrophic commands and writes outside the workspace remain blocked.",
 };
 
 const emptyProfile = (): AgentProfile => ({

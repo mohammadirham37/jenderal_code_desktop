@@ -84,7 +84,7 @@ export function ApprovalCard({
                 variant="primary"
                 size="sm"
                 disabled={busy}
-                title="Approve this and stop asking for the rest of the session (git push/pull and sensitive files still ask; destructive commands stay blocked)."
+                title="Approve this and everything else for the rest of the session — no more prompts. Catastrophic commands and writes outside the project stay blocked."
                 onClick={() => void fullAccess()}
               >
                 <Zap size={11} /> Full access

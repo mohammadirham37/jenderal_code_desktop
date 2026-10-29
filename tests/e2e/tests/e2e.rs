@@ -191,14 +191,15 @@ async fn balanced_policy_edits_auto_commands_ask() -> anyhow::Result<()> {
     assert_eq!(cps.len(), 1);
     assert_eq!(cps[0].rel_path, "mock-demo.txt");
 
-    // Commands still ask in balanced; git remote bypasses are caught even in yolo.
+    // Commands still ask in balanced; full access (yolo) never prompts, but the
+    // catastrophic deny-list still holds.
     let root = std::fs::canonicalize(project.path())?;
     let balanced = PolicyEngine::new(PolicyMode::Balanced, &root);
     let cmd = |c: &str| Action::RunCommand { command: c.into(), cwd: root.clone() };
     assert!(matches!(balanced.check(&cmd("cargo test")), CheckOutcome::NeedsApproval(_)));
     let yolo = PolicyEngine::new(PolicyMode::Yolo, &root);
     assert!(matches!(yolo.check(&cmd("cargo test")), CheckOutcome::Allowed));
-    assert!(matches!(yolo.check(&cmd("true && git -C . push")), CheckOutcome::NeedsApproval(_)));
+    assert!(matches!(yolo.check(&cmd("true && git -C . push")), CheckOutcome::Allowed));
     assert!(matches!(yolo.check(&cmd("rm -fr ~")), CheckOutcome::Denied(_)));
     Ok(())
 }

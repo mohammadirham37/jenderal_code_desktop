@@ -51,7 +51,7 @@ Setiap event dilewatkan `EventSink` (trait di agent-runtime) yang diimplementasi
 | Akses di luar workspace | Ditolak untuk tulis; baca perlu persetujuan eksplisit | `permissions/src/lib.rs` |
 | File sensitif (.env, key) | Selalu butuh persetujuan + peringatan | `permissions::is_sensitive_path` |
 | Perintah destruktif | Tokenizer per segmen + deny-list mutlak (rm -rf /, mkfs, …) | `permissions::assess_command`, `is_catastrophic_command` |
-| git push/pull/fetch/remote, sudo, curl\|sh | Selalu minta persetujuan (juga di Yolo) | `permissions::is_git_remote_command` |
+| git push/pull/fetch/remote, sudo, curl\|sh | Minta persetujuan di Safe/Balanced; Yolo (Full access) selalu mengizinkan | `permissions::is_git_remote_command` |
 | Proses liar | Timeout + cap output + kill process group | `tool-terminal/src/lib.rs` |
 | Edit tak terpulihkan | Checkpoint sebelum tiap tulis/hapus; `restore_checkpoints` | `tool-filesystem::CheckpointStore` |
 | Kebocoran API key | File 0600 (tulis atomik) atau OS keychain; DB hanya menyimpan referensi; env rahasia dihapus dari proses anak | `provider-core/src/credentials.rs`, `tool-terminal::is_secret_env_name` |

@@ -33,7 +33,7 @@ Dibangun sesuai *JenderalCode-Desktop-PRD.md* v1.0 (MVP).
 | **Usage dashboard** | Token, estimasi biaya (pricing per model bisa diatur), grafik 30 hari (FR-15) |
 | **Mode Chat / Code** | Mode **Chat** (default): daftar percakapan, chat lebar, panel konteks (Changes/Files/Editor/Terminal/Git). Mode **Code**: layout IDE dengan chat di samping. Ganti lewat toggle di header proyek atau ⌘K; pilihan terakhir diingat |
 | **Zoom UI** | Zoom in/out dengan ⌘+/⌘− (Ctrl+/Ctrl− di Windows/Linux), reset ⌘0; level tersimpan dan dipulihkan saat aplikasi dibuka |
-| **Keamanan** | Permission engine (Safe/Balanced/Yolo), approval card, checkpoint restore, API key di OS keychain, proteksi path traversal & symlink escape, file sensitif (.env dsb.) selalu minta persetujuan |
+| **Keamanan** | Permission engine (Safe/Balanced/Yolo), approval card, checkpoint restore, API key di OS keychain, proteksi path traversal & symlink escape, file sensitif (.env dsb.) minta persetujuan (kecuali mode Full access) |
 
 ### Provider yang didukung
 
@@ -149,7 +149,7 @@ SQLite (`jenderalcode.db`) menyimpan metadata aplikasi sesuai PRD §11: `workspa
 - API key disimpan **di luar database**: default berupa file khusus dengan permission 0600 (tanpa prompt password OS sama sekali), atau OS keychain (macOS Keychain / Windows Credential Manager / Secret Service) bila dipilih di **Settings → Privacy** — key yang sudah tersimpan dimigrasi otomatis saat berganti.
 - Semua path dari model divalidasi: canonicalize + containment terhadap root workspace; symlink escape ditolak; penulisan di luar workspace selalu ditolak.
 - File sensitif (`.env`, `*.pem`, `id_rsa`, …) selalu meminta persetujuan sebelum dibaca.
-- Perintah shell dianalisis per segmen (`;`, `|`, `&&`, `$(…)`, `bash -c`, …): perintah destruktif (`rm -rf /`, `rm -fr ~`, `mkfs`, …) ditolak mutlak; git push/pull/fetch/remote, `sudo`, dan pola download-lalu-eksekusi (`curl … | sh`) selalu minta persetujuan. Mode Balanced meminta persetujuan untuk setiap perintah.
+- Perintah shell dianalisis per segmen (`;`, `|`, `&&`, `$(…)`, `bash -c`, …): perintah destruktif (`rm -rf /`, `rm -fr ~`, `mkfs`, …) ditolak mutlak; git push/pull/fetch/remote, `sudo`, dan pola download-lalu-eksekusi (`curl … | sh`) minta persetujuan di Safe/Balanced. Mode Balanced meminta persetujuan untuk setiap perintah. Mode **Full access** (Yolo) tidak pernah meminta persetujuan; hanya perintah katastrofik dan penulisan di luar proyek yang tetap ditolak.
 - Penulisan file tidak pernah mengikuti symlink (O_NOFOLLOW); pencarian melewati symlink dan file rahasia.
 - Webview dikunci dengan CSP ketat dan pembatasan navigasi; output model tidak bisa memuat gambar/URL eksternal.
 - Variabel lingkungan rahasia (`*_API_KEY`, `*_TOKEN`, …) dihapus dari proses terminal dan perintah agent.

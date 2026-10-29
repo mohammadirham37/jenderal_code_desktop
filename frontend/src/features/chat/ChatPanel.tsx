@@ -63,7 +63,7 @@ const POLICY_OPTIONS: {
   {
     value: "yolo",
     label: "Full access",
-    desc: "No more prompts inside this workspace — edits, deletions, and commands run automatically. (git push/pull and sensitive files like .env still ask; destructive commands stay blocked.)",
+    desc: "Always allow — no prompts at all. Edits, deletions, commands, git push/pull, and sensitive files like .env run automatically. Only catastrophic commands (rm -rf /, mkfs, …) and writes outside the project stay blocked.",
   },
 ];
 
@@ -466,13 +466,6 @@ function ComposerControls() {
               <button
                 key={o.value}
                 onClick={async () => {
-                  if (
-                    o.value === "yolo" &&
-                    !window.confirm(
-                      "Full access lets the agent edit, delete, and run commands in this workspace without asking. Continue?",
-                    )
-                  )
-                    return;
                   await useChat.getState().setPolicy(o.value);
                   setMenu(null);
                 }}
