@@ -211,6 +211,29 @@ export interface UsageSummary {
   by_day: DayUsage[];
 }
 
+/** Per-session token usage; `last_input` ≈ how full the context is now. */
+export interface SessionUsage {
+  total_input: number;
+  total_output: number;
+  total_cost?: number | null;
+  requests: number;
+  last_input: number;
+  last_output: number;
+}
+
+export interface BrowserBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserStateEvent {
+  id: string;
+  url: string;
+  loading: boolean;
+}
+
 export interface SessionDetail {
   session: SessionSummary;
   messages: MessageRecord[];
@@ -415,11 +438,22 @@ export const api = {
   getDataDir: () => invoke<string>("get_data_dir"),
   setZoom: (factor: number) => invoke<void>("set_zoom", { factor }),
   usageSummary: () => invoke<UsageSummary>("usage_summary"),
+  getSessionUsage: (sessionId: string) => invoke<SessionUsage>("get_session_usage", { sessionId }),
   getSettings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   applyRetention: (days: number) => invoke<number>("apply_retention", { days }),
   clearHistory: () => invoke<number>("clear_history"),
   exportHistory: (path: string) => invoke<string>("export_history", { path }),
+
+  // Browser preview (native child webview)
+  browserOpen: (id: string, url: string, bounds: BrowserBounds) =>
+    invoke<string>("browser_open", { id, url, bounds }),
+  browserSetBounds: (id: string, bounds: BrowserBounds) => invoke<void>("browser_set_bounds", { id, bounds }),
+  browserSetVisible: (id: string, visible: boolean) => invoke<void>("browser_set_visible", { id, visible }),
+  browserNavigate: (id: string, url: string) => invoke<string>("browser_navigate", { id, url }),
+  browserAction: (id: string, action: "back" | "forward" | "reload" | "stop") =>
+    invoke<void>("browser_action", { id, action }),
+  browserClose: (id: string) => invoke<void>("browser_close", { id }),
 
   // Terminals
   terminalCreate: (id: string, cols?: number, rows?: number) =>
@@ -455,6 +489,10 @@ export const events = {
     listen<ToolRunEvent>("chat://tool", (ev) => cb(ev.payload)),
   chatApproval: (cb: (e: ApprovalEvent) => void): Promise<UnlistenFn> =>
     listen<ApprovalEvent>("chat://approval", (ev) => cb(ev.payload)),
+  chatUsage: (cb: (e: UsageEvent) => void): Promise<UnlistenFn> =>
+    listen<UsageEvent>("chat://usage", (ev) => cb(ev.payload)),
+  browserState: (cb: (e: BrowserStateEvent) => void): Promise<UnlistenFn> =>
+    listen<BrowserStateEvent>("browser://state", (ev) => cb(ev.payload)),
   chatError: (cb: (e: ChatErrorEvent) => void): Promise<UnlistenFn> =>
     listen<ChatErrorEvent>("chat://error", (ev) => cb(ev.payload)),
   terminalData: (cb: (e: TerminalDataEvent) => void): Promise<UnlistenFn> =>

@@ -32,6 +32,8 @@ Dibangun sesuai *JenderalCode-Desktop-PRD.md* v1.0 (MVP).
 | **Git panel** | Status, diff, staging, commit, branch, discard (FR-11) |
 | **Usage dashboard** | Token, estimasi biaya (pricing per model bisa diatur), grafik 30 hari (FR-15) |
 | **Mode Chat / Code** | Mode **Chat** (default): daftar percakapan, chat lebar, panel konteks (Changes/Files/Editor/Terminal/Git). Mode **Code**: layout IDE dengan chat di samping. Ganti lewat toggle di header proyek atau ⌘K; pilihan terakhir diingat |
+| **Browser preview** | Tab **Browser** (panel konteks mode Chat / panel bawah mode Code) untuk membuka `localhost:3000` dsb. — webview native terisolasi (tanpa akses IPC, cookie terpisah), back/forward/reload, URL terakhir per proyek diingat |
+| **Token & konteks** | Meter di kotak chat: persentase jendela konteks terpakai + total token input/output, jumlah request, dan estimasi biaya per percakapan |
 | **Zoom UI** | Zoom in/out dengan ⌘+/⌘− (Ctrl+/Ctrl− di Windows/Linux), reset ⌘0; level tersimpan dan dipulihkan saat aplikasi dibuka |
 | **Keamanan** | Permission engine (Safe/Balanced/Yolo), approval card, checkpoint restore, API key di OS keychain, proteksi path traversal & symlink escape, file sensitif (.env dsb.) minta persetujuan (kecuali mode Full access) |
 

@@ -849,6 +849,15 @@ pub async fn usage_summary(state: State<'_, AppState>) -> CmdResult<jcode_storag
 }
 
 #[tauri::command]
+pub async fn get_session_usage(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> CmdResult<jcode_storage::SessionUsage> {
+    let db = state.db.clone();
+    blocking(move || db.session_usage(&session_id).map_err(err)).await
+}
+
+#[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> CmdResult<AppSettings> {
     state.db.get_settings().map_err(err)
 }

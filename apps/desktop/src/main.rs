@@ -1,5 +1,6 @@
 //! JenderalCode Desktop — Tauri application entry point.
 
+mod browser;
 mod commands;
 mod sink;
 mod state;
@@ -60,8 +61,13 @@ fn is_allowed_navigation(url: &tauri::Url) -> bool {
 
 fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("navigation-guard")
-        .on_navigation(|_webview, url| {
-            let allowed = is_allowed_navigation(url);
+        .on_navigation(|webview, url| {
+            // Browser previews follow their own (http/https-only) rule.
+            let allowed = if browser::is_preview_label(webview.label()) {
+                browser::is_allowed_preview_navigation(url)
+            } else {
+                is_allowed_navigation(url)
+            };
             if !allowed {
                 log::warn!("blocked webview navigation to {url}");
             }
@@ -203,6 +209,13 @@ fn main() {
             commands::get_data_dir,
             commands::set_zoom,
             commands::usage_summary,
+            commands::get_session_usage,
+            browser::browser_open,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_navigate,
+            browser::browser_action,
+            browser::browser_close,
             commands::get_settings,
             commands::save_settings,
             commands::apply_retention,

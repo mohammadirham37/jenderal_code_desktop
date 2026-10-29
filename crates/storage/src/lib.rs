@@ -839,6 +839,37 @@ impl Db {
         })
     }
 
+    /// Token totals for one session plus the most recent request, whose
+    /// input size approximates how full the model's context currently is.
+    pub fn session_usage(&self, session_id: &str) -> Result<SessionUsage> {
+        self.with_conn(|conn| {
+            let (total_in, total_out, total_cost, requests): (i64, i64, Option<f64>, i64) = conn
+                .prepare_cached(
+                    "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                            SUM(cost_estimate), COUNT(*)
+                     FROM usage_records WHERE session_id = ?1",
+                )?
+                .query_row(params![session_id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })?;
+            let last: Option<(i64, i64)> = conn
+                .prepare_cached(
+                    "SELECT input_tokens, output_tokens FROM usage_records
+                     WHERE session_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                )?
+                .query_row(params![session_id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            Ok(SessionUsage {
+                total_input: total_in as u64,
+                total_output: total_out as u64,
+                total_cost,
+                requests: requests as u64,
+                last_input: last.map_or(0, |l| l.0 as u64),
+                last_output: last.map_or(0, |l| l.1 as u64),
+            })
+        })
+    }
+
     pub fn usage_summary(&self) -> Result<UsageSummary> {
         self.with_conn(|conn| {
             let (total_in, total_out, total_cost, sessions): (i64, i64, Option<f64>, i64) =
@@ -1065,6 +1096,18 @@ fn parse_tool_run_status(s: &str) -> ToolRunStatus {
         "cancelled" => ToolRunStatus::Cancelled,
         _ => ToolRunStatus::Error,
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SessionUsage {
+    pub total_input: u64,
+    pub total_output: u64,
+    #[serde(default)]
+    pub total_cost: Option<f64>,
+    pub requests: u64,
+    /// Input tokens of the latest model request (≈ current context size).
+    pub last_input: u64,
+    pub last_output: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1304,6 +1347,32 @@ mod tests {
         assert!((sum.total_cost.unwrap() - 0.002).abs() < 1e-9);
         assert_eq!(sum.by_provider.len(), 1);
         assert_eq!(sum.by_day.len(), 1);
+    }
+
+    #[test]
+    fn session_usage_totals_and_latest_request() {
+        let d = db();
+        let w = d.upsert_workspace("/tmp/p4", "p4").unwrap();
+        let s = d.create_session(&w.id, "s", None, Some("prov1"), Some("m1")).unwrap();
+        let other = d.create_session(&w.id, "o", None, Some("prov1"), Some("m1")).unwrap();
+        assert_eq!(d.session_usage(&s.id).unwrap(), SessionUsage::default());
+        for (sid, i, o, at) in [(&s.id, 100u64, 50u64, 1_000i64), (&s.id, 900, 20, 2_000), (&other.id, 7, 7, 3_000)] {
+            d.insert_usage_record(&UsageRecord {
+                id: new_id(),
+                session_id: sid.clone(),
+                provider_id: "prov1".into(),
+                model_name: "m1".into(),
+                input_tokens: i,
+                output_tokens: o,
+                cost_estimate: None,
+                created_at: at,
+            })
+            .unwrap();
+        }
+        let u = d.session_usage(&s.id).unwrap();
+        assert_eq!((u.total_input, u.total_output, u.requests), (1000, 70, 2));
+        assert_eq!((u.last_input, u.last_output), (900, 20));
+        assert_eq!(u.total_cost, None);
     }
 
     #[test]

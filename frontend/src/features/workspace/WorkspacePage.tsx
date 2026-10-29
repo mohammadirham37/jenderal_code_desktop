@@ -2,7 +2,8 @@
  *  the IDE layout (explorer | editor + bottom panel | chat) or the
  *  chat-first layout. */
 import { useState } from "react";
-import { Code2, GitBranch, MessagesSquare, PanelBottom, PanelBottomClose, Terminal as TerminalIcon } from "lucide-react";
+import { Code2, GitBranch, Globe, MessagesSquare, PanelBottom, PanelBottomClose, Terminal as TerminalIcon } from "lucide-react";
+import { BrowserPanel } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
 import { ChatPanel } from "@/features/chat/ChatPanel";
 import { ChatLayout } from "./ChatLayout";
@@ -67,7 +68,7 @@ function LayoutSwitch() {
   );
 }
 
-type BottomTab = "terminal" | "git";
+type BottomTab = "terminal" | "git" | "browser";
 
 function CodeLayout() {
   const [bottomTab, setBottomTab] = useState<BottomTab>("terminal");
@@ -115,6 +116,9 @@ function CodeLayout() {
             <button className={tabClass("git")} onClick={() => showTab("git")}>
               <GitBranch size={11} /> Git
             </button>
+            <button className={tabClass("browser")} onClick={() => showTab("browser")}>
+              <Globe size={11} /> Browser
+            </button>
             <IconButton className="ml-auto" title="Hide bottom panel" onClick={() => setBottomOpen(false)}>
               <PanelBottomClose size={13} />
             </IconButton>
@@ -122,7 +126,11 @@ function CodeLayout() {
           <div className="relative min-h-0 flex-1 bg-[#0d0f14] text-neutral-200">
             {[...visited].map((t) => (
               <div key={t} className={`absolute inset-0 ${t === bottomTab ? "block" : "hidden"}`}>
-                <PanelSuspense>{t === "terminal" ? <LazyTerminalPanel /> : <LazyGitPanel />}</PanelSuspense>
+                <PanelSuspense>
+                  {t === "terminal" && <LazyTerminalPanel />}
+                  {t === "git" && <LazyGitPanel />}
+                  {t === "browser" && <BrowserPanel id="code" />}
+                </PanelSuspense>
               </div>
             ))}
           </div>
@@ -134,6 +142,9 @@ function CodeLayout() {
             </button>
             <button className={tabClass("git")} onClick={() => showTab("git")}>
               <GitBranch size={11} /> Git
+            </button>
+            <button className={tabClass("browser")} onClick={() => showTab("browser")}>
+              <Globe size={11} /> Browser
             </button>
           </div>
         )}

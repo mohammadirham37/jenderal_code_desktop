@@ -34,6 +34,7 @@ import { api, type ApprovalRecord, type MessageRecord, type ToolRunRecord } from
 import { Badge, IconButton, Spinner } from "@/components/ui";
 import { ToolRunCard } from "./ToolRunCard";
 import { ApprovalCard } from "./ApprovalCard";
+import { ContextMeter } from "./ContextMeter";
 
 export type ChatVariant = "side" | "full";
 
@@ -367,6 +368,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
               </IconButton>
               <ComposerControls />
               <div className="ml-auto flex items-center gap-1">
+                <ContextMeter />
                 {!full && <span className="hidden text-[10px] text-neutral-400 xl:inline">⏎ send · ⇧⏎ newline</span>}
                 {busy ? (
                   <button

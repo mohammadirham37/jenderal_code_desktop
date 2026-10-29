@@ -8,6 +8,7 @@ import {
   type ChatStatus,
   type MessageRecord,
   type SessionSummary,
+  type SessionUsage,
   type ToolRunRecord,
 } from "@/lib/ipc";
 
@@ -23,7 +24,8 @@ interface ChatState {
   status: ChatStatus;
   statusDetail: string | null;
   lastError: string | null;
-  usage: { input: number; output: number; cost: number | null };
+  /** Token usage of the active session (null until loaded). */
+  usage: SessionUsage | null;
   initialized: boolean;
 
   init: () => Promise<void>;
@@ -65,7 +67,7 @@ export const useChat = create<ChatState>((set, get) => ({
   status: "idle",
   statusDetail: null,
   lastError: null,
-  usage: { input: 0, output: 0, cost: null },
+  usage: null,
   initialized: false,
 
   init: async () => {
@@ -142,6 +144,23 @@ export const useChat = create<ChatState>((set, get) => ({
         return { approvals };
       });
     });
+    await events.chatUsage((e) => {
+      if (e.session_id !== get().activeSessionId) return;
+      set((s) => {
+        const u = s.usage ?? { total_input: 0, total_output: 0, total_cost: null, requests: 0, last_input: 0, last_output: 0 };
+        const cost = e.cost_estimate ?? null;
+        return {
+          usage: {
+            total_input: u.total_input + e.usage.input_tokens,
+            total_output: u.total_output + e.usage.output_tokens,
+            total_cost: cost === null ? (u.total_cost ?? null) : (u.total_cost ?? 0) + cost,
+            requests: u.requests + 1,
+            last_input: e.usage.input_tokens,
+            last_output: e.usage.output_tokens,
+          },
+        };
+      });
+    });
     await events.chatError((e) => {
       if (e.session_id !== get().activeSessionId) return;
       pending = null;
@@ -158,9 +177,13 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   selectSession: async (id) => {
-    const detail = await api.getSessionDetail(id);
+    const [detail, usage] = await Promise.all([
+      api.getSessionDetail(id),
+      api.getSessionUsage(id).catch(() => null),
+    ]);
     set({
       activeSessionId: id,
+      usage,
       messages: detail.messages,
       toolRuns: detail.tool_runs,
       approvals: detail.approvals,
@@ -243,6 +266,7 @@ export const useChat = create<ChatState>((set, get) => ({
     if (get().activeSessionId === id) {
       set({
         activeSessionId: null,
+        usage: null,
         messages: [],
         toolRuns: [],
         approvals: [],

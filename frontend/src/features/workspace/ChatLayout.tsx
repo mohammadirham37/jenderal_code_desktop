@@ -8,6 +8,7 @@ import {
   FilePlus,
   FolderTree,
   GitBranch,
+  Globe,
   MessageSquare,
   PanelRightClose,
   PanelRightOpen,
@@ -18,6 +19,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { ChatPanel } from "@/features/chat/ChatPanel";
+import { BrowserPanel } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
 import { LazyEditorPane, LazyGitPanel, LazyTerminalPanel, PanelSuspense } from "./lazy";
 import { useApp } from "@/stores/app";
@@ -27,12 +29,13 @@ import { EmptyState, IconButton } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 import { useResizable } from "./useResizable";
 
-type ContextTab = "changes" | "files" | "editor" | "terminal" | "git";
+type ContextTab = "changes" | "files" | "editor" | "browser" | "terminal" | "git";
 
 const CONTEXT_TABS: { id: ContextTab; label: string; icon: typeof FileDiff }[] = [
   { id: "changes", label: "Changes", icon: FileDiff },
   { id: "files", label: "Files", icon: FolderTree },
   { id: "editor", label: "Editor", icon: FileCode2 },
+  { id: "browser", label: "Browser", icon: Globe },
   { id: "terminal", label: "Terminal", icon: TerminalIcon },
   { id: "git", label: "Git", icon: GitBranch },
 ];
@@ -97,12 +100,13 @@ export function ChatLayout() {
           contextOpen ? "flex" : "hidden"
         }`}
       >
-        <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-neutral-200 px-1.5 dark:border-neutral-800">
+        <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-neutral-200 px-1.5 [scrollbar-width:none] dark:border-neutral-800">
           {CONTEXT_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => showTab(id)}
-              className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] ${
+              title={label}
+              className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] ${
                 tab === id
                   ? "bg-indigo-500/10 font-medium text-indigo-500 dark:text-indigo-300"
                   : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
@@ -119,6 +123,7 @@ export function ChatLayout() {
                 {t === "changes" && <ChangesPanel onOpen={() => showTab("editor")} />}
                 {t === "files" && <FileExplorer />}
                 {t === "editor" && <LazyEditorPane />}
+                {t === "browser" && <BrowserPanel id="chat" />}
                 {t === "terminal" && <LazyTerminalPanel />}
                 {t === "git" && <LazyGitPanel />}
               </PanelSuspense>

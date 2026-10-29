@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main window",
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "description": "Capabilities for the main app webview only (browser previews get none)",
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ],
+  "webviews": [
+    "main"
+  ]
 }
