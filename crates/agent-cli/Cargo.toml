@@ -1,0 +1,14 @@
+[package]
+name = "jcode-agent-cli"
+description = "External coding agent CLI adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jcode-common = { workspace = true }
+jcode-tool-terminal = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

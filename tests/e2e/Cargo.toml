@@ -1,0 +1,20 @@
+[package]
+name = "jcode-e2e-tests"
+description = "Cross-crate end-to-end tests exercising the full agent stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+jcode-common = { workspace = true }
+jcode-storage = { workspace = true }
+jcode-provider-core = { workspace = true }
+jcode-agent-runtime = { workspace = true }
+jcode-tool-filesystem = { workspace = true }
+jcode-tool-git = { workspace = true }
+jcode-permissions = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tempfile = "3"

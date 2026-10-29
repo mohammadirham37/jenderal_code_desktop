@@ -1,0 +1,18 @@
+[package]
+name = "jcode-storage"
+description = "SQLite storage and migrations for JenderalCode Desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jcode-common = { workspace = true }
+anyhow = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

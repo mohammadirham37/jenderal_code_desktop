@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/desktop",
+    "crates/common",
+    "crates/permissions",
+    "crates/storage",
+    "crates/provider-core",
+    "crates/provider-openai",
+    "crates/provider-anthropic",
+    "crates/provider-google",
+    "crates/tool-filesystem",
+    "crates/tool-terminal",
+    "crates/tool-git",
+    "crates/agent-cli",
+    "crates/agent-runtime",
+    "tests/e2e",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/jenderalcode/jenderalcode-desktop"
+
+[workspace.dependencies]
+# Internal crates
+jcode-common = { path = "crates/common" }
+jcode-permissions = { path = "crates/permissions" }
+jcode-storage = { path = "crates/storage" }
+jcode-provider-core = { path = "crates/provider-core" }
+jcode-provider-openai = { path = "crates/provider-openai" }
+jcode-provider-anthropic = { path = "crates/provider-anthropic" }
+jcode-provider-google = { path = "crates/provider-google" }
+jcode-tool-filesystem = { path = "crates/tool-filesystem" }
+jcode-tool-terminal = { path = "crates/tool-terminal" }
+jcode-tool-git = { path = "crates/tool-git" }
+jcode-agent-cli = { path = "crates/agent-cli" }
+jcode-agent-runtime = { path = "crates/agent-runtime" }
+
+# External dependencies
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+notify = "8"
+portable-pty = "0.9"
+similar = "2"
+ignore = "0.4"
+glob = "0.3"
+log = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

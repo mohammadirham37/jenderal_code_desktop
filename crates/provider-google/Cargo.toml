@@ -1,0 +1,17 @@
+[package]
+name = "jcode-provider-google"
+description = "Google Gemini adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jcode-common = { workspace = true }
+jcode-provider-core = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
