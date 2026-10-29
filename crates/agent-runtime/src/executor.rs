@@ -142,7 +142,7 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
         ));
         specs.push(spec(
             "fs_edit",
-            "Replace an exact string in a file. old_string must match the file exactly (including whitespace) and be unique unless replace_all is true. Prefer this over fs_write for small changes.",
+            "Replace a string in a file. Always fs_read the file first and copy old_string from its CURRENT content (not from memory) — include 2-3 surrounding lines so it is unique. Small differences in indentation, trailing whitespace, line endings or quote style are tolerated; the match must still be unique unless replace_all is true. Prefer this over fs_write for small changes. On failure the error shows the most similar region of the file.",
             json!({
                 "path": {"type": "string"},
                 "old_string": {"type": "string"},
@@ -327,21 +327,13 @@ pub fn preview(name: &str, args: &Value, ctx: &ToolContext) -> Option<String> {
             let new = get_str(args, "new_string").ok()?;
             let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
             let before = ctx.workspace.read_file(&path).ok()?;
-            let occurrences = before.matches(&old).count();
-            if occurrences == 0 {
-                return Some(format!("(old_string not found in {path} — this edit will fail)"));
+            match jcode_tool_filesystem::plan_edit(&before, &old, &new, replace_all, &path) {
+                Ok(p) => Some(jcode_tool_filesystem::unified_diff(&before, &p.after, &path)),
+                Err(e) => {
+                    let first = e.to_string().lines().next().unwrap_or_default().to_string();
+                    Some(format!("(this edit will fail: {first})"))
+                }
             }
-            if occurrences > 1 && !replace_all {
-                return Some(format!(
-                    "(old_string occurs {occurrences} times in {path} — provide more context or set replace_all)"
-                ));
-            }
-            let after = if replace_all {
-                before.replace(&old, &new)
-            } else {
-                before.replacen(&old, &new, 1)
-            };
-            Some(jcode_tool_filesystem::unified_diff(&before, &after, &path))
         }
         "fs_delete" => {
             let path = get_str(args, "path").ok()?;
@@ -521,9 +513,17 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
             let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
             ctx.checkpoint(&path)?;
             let out = ws.edit_file(&path, &old, &new, replace_all)?;
+            let fuzzy = out.strategy.filter(|s| *s != jcode_tool_filesystem::MatchStrategy::Exact);
+            let note = fuzzy.map(|s| format!(" ({})", s.describe())).unwrap_or_default();
+            // Show the model what actually changed, so it can verify the
+            // edit (especially a relaxed match) without re-reading the file.
+            let result_for_model = truncate_for_model(&format!(
+                "Successfully edited {}{note}. Resulting diff:\n{}",
+                out.path, out.diff
+            ));
             Ok(ToolOutcome {
-                summary: format!("Edited {} ({} replacement(s))", out.path, out.occurrences),
-                result_for_model: format!("Successfully edited {}.", out.path),
+                summary: format!("Edited {} ({} replacement(s)){note}", out.path, out.occurrences),
+                result_for_model,
                 diff: Some(out.diff),
             })
         }

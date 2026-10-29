@@ -64,7 +64,7 @@ export const useApp = create<AppState>((set, get) => ({
     default_policy_mode: "safe",
     editor_font_size: 13,
     terminal_font_size: 12,
-    max_iterations: 30,
+    max_iterations: 100,
     retention_days: null,
     show_hidden_files: false,
     credential_storage: "file",

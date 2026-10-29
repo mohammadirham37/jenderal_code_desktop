@@ -238,14 +238,19 @@ export function SettingsPage() {
                 <option value="yolo">Yolo — auto-approve inside workspace</option>
               </select>
             </Field>
-            <Field label="Max agent iterations per turn" hint="Safety limit on the tool-calling loop.">
+            <Field
+              label="Max agent steps per turn"
+              hint="How many model ↔ tool round-trips one message may take. When reached, the agent pauses and you can press Continue."
+            >
               <input
                 type="number"
                 min={1}
-                max={100}
+                max={500}
                 className={`${inputClass} w-32`}
                 value={settings.max_iterations}
-                onChange={(e) => void updateSettings({ max_iterations: Number(e.target.value) })}
+                onChange={(e) =>
+                  void updateSettings({ max_iterations: Math.min(500, Math.max(1, Number(e.target.value) || 1)) })
+                }
               />
             </Field>
           </section>

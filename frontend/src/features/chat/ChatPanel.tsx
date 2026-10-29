@@ -18,6 +18,8 @@ import {
   History,
   MessageSquarePlus,
   Paperclip,
+  Pause,
+  Play,
   ShieldCheck,
   Sparkles,
   Square,
@@ -76,6 +78,10 @@ const SUGGESTIONS = [
 ];
 
 const MAX_ATTACHMENTS = 10;
+
+/** Must match `PAUSE_MARKER` in crates/agent-runtime. */
+const PAUSE_MARKER = "⏸ **Paused.**";
+const CONTINUE_PROMPT = "Continue where you left off.";
 
 export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
   const workspace = useApp((s) => s.workspace);
@@ -288,8 +294,15 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
           {empty && workspace && (
             <EmptyChat full={full} onPick={(s) => void send(s)} disabled={busy || !chat.activeSessionId} />
           )}
-          {timeline.map((item) =>
-            item.kind === "message" ? (
+          {timeline.map((item, i) =>
+            item.kind === "message" && item.message.role === "assistant" && item.message.content.startsWith(PAUSE_MARKER) ? (
+              <PausedNotice
+                key={item.id}
+                text={item.message.content.slice(PAUSE_MARKER.length).trim()}
+                canContinue={i === timeline.length - 1 && !busy && !chat.hasStreaming}
+                onContinue={() => void send(CONTINUE_PROMPT)}
+              />
+            ) : item.kind === "message" ? (
               <MessageBubble key={item.id} message={item.message} full={full} onOpenFile={openFile} />
             ) : (
               <ToolGroup
@@ -746,6 +759,37 @@ const ToolGroup = memo(function ToolGroup({
     </div>
   );
 });
+
+/** A turn that stopped early (step limit or a stuck tool loop). */
+function PausedNotice({
+  text,
+  canContinue,
+  onContinue,
+}: {
+  text: string;
+  canContinue: boolean;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+      <Pause size={14} className="mt-0.5 shrink-0 text-amber-500" />
+      <div className="min-w-0 flex-1 text-xs">
+        <div className="font-semibold text-amber-600 dark:text-amber-400">Agent paused</div>
+        <div className="md mt-0.5 text-neutral-600 dark:text-neutral-300">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        </div>
+      </div>
+      {canContinue && (
+        <button
+          onClick={onContinue}
+          className="flex shrink-0 items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-400"
+        >
+          <Play size={11} fill="currentColor" /> Continue
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** Subscribes to the streaming text on its own so the rest of the panel does
  *  not re-render for every token. */

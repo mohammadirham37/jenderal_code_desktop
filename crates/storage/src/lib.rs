@@ -14,6 +14,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("001_init", include_str!("../migrations/001_init.sql")),
     ("002_session_policy", include_str!("../migrations/002_session_policy.sql")),
     ("003_indexes", include_str!("../migrations/003_indexes.sql")),
+    ("004_raise_iteration_limit", include_str!("../migrations/004_raise_iteration_limit.sql")),
 ];
 
 pub struct Db {
@@ -1373,6 +1374,29 @@ mod tests {
         assert_eq!((u.total_input, u.total_output, u.requests), (1000, 70, 2));
         assert_eq!((u.last_input, u.last_output), (900, 20));
         assert_eq!(u.total_cost, None);
+    }
+
+    #[test]
+    fn old_default_iteration_limit_is_raised_by_migration() {
+        let d = db();
+        let mut s = d.get_settings().unwrap();
+        s.max_iterations = 30;
+        d.save_settings(&s).unwrap();
+        d.with_conn(|c| {
+            c.execute_batch(include_str!("../migrations/004_raise_iteration_limit.sql"))?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(d.get_settings().unwrap().max_iterations, 100);
+        // Custom values are kept.
+        s.max_iterations = 45;
+        d.save_settings(&s).unwrap();
+        d.with_conn(|c| {
+            c.execute_batch(include_str!("../migrations/004_raise_iteration_limit.sql"))?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(d.get_settings().unwrap().max_iterations, 45);
     }
 
     #[test]

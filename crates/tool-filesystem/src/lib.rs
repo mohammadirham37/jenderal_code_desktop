@@ -14,6 +14,10 @@
 //! executor, so a symlink inside the workspace pointing outside cannot be
 //! used to read or write outside files.
 
+mod edit;
+
+pub use edit::{plan_edit, MatchStrategy, PlannedEdit};
+
 use anyhow::{anyhow, bail, Context, Result};
 use glob::Pattern;
 use ignore::WalkBuilder;
@@ -133,6 +137,9 @@ pub struct EditOutcome {
     pub occurrences: usize,
     pub applied: bool,
     pub diff: String,
+    /// How `old_string` was matched (edits only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<MatchStrategy>,
 }
 
 impl Workspace {
@@ -290,6 +297,7 @@ impl Workspace {
             occurrences: if existed_before { 1 } else { 0 },
             applied: true,
             diff,
+            strategy: None,
         })
     }
 
@@ -302,36 +310,18 @@ impl Workspace {
         new_string: &str,
         replace_all: bool,
     ) -> Result<EditOutcome> {
-        if old_string == new_string {
-            bail!("old_string and new_string are identical");
-        }
         let abs = self.resolve(rel)?;
-        let before = self.read_file(&self.rel_string(&abs))?;
-        let occurrences = before.matches(old_string).count();
-        if occurrences == 0 {
-            bail!(
-                "old_string not found in {}. Make sure it matches the file exactly, including whitespace and indentation.",
-                self.rel_string(&abs)
-            );
-        }
-        if occurrences > 1 && !replace_all {
-            bail!(
-                "old_string occurs {occurrences} times in {}. Provide more surrounding context to make it unique, or set replace_all=true.",
-                self.rel_string(&abs)
-            );
-        }
-        let after = if replace_all {
-            before.replace(old_string, new_string)
-        } else {
-            before.replacen(old_string, new_string, 1)
-        };
-        write_no_follow(&abs, after.as_bytes())?;
-        let diff = unified_diff(&before, &after, &self.rel_string(&abs));
+        let rel = self.rel_string(&abs);
+        let before = self.read_file(&rel)?;
+        let planned = plan_edit(&before, old_string, new_string, replace_all, &rel)?;
+        write_no_follow(&abs, planned.after.as_bytes())?;
+        let diff = unified_diff(&before, &planned.after, &rel);
         Ok(EditOutcome {
-            path: self.rel_string(&abs),
-            occurrences,
+            path: rel,
+            occurrences: planned.occurrences,
             applied: true,
             diff,
+            strategy: Some(planned.strategy),
         })
     }
 

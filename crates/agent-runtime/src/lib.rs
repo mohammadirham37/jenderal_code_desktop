@@ -20,6 +20,13 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+/// Prefix of the assistant note written when a turn pauses (step limit or a
+/// stuck tool loop). The UI shows a "Continue" button after such a message.
+pub const PAUSE_MARKER: &str = "⏸ **Paused.**";
+
+/// Identical failing tool calls in a row before the turn is paused.
+const REPEATED_FAILURE_LIMIT: u32 = 3;
 use tokio::sync::oneshot;
 
 pub use jcode_permissions::PolicyMode;
@@ -569,14 +576,24 @@ impl AgentRuntime {
         );
 
         let mut iteration = 0u32;
+        // Consecutive failures of the exact same tool call: a model that
+        // keeps retrying an identical failing call is stuck, so pause the
+        // turn instead of burning the remaining iterations.
+        let mut repeated_failures: HashMap<String, u32> = HashMap::new();
         loop {
             iteration += 1;
             if iteration > max_iterations {
-                sink.error(
+                self.pause_turn(
                     session_id,
-                    &format!("iteration limit ({max_iterations}) reached; stopping"),
+                    &format!(
+                        "I used all {max_iterations} steps allowed for one turn. \
+                         Press **Continue** to keep going (the step limit can be raised in Settings → Agent)."
+                    ),
+                    &sink,
+                    &db,
+                    &mut history,
                 )
-                .await;
+                .await?;
                 break;
             }
 
@@ -736,9 +753,31 @@ impl AgentRuntime {
                     tool_name: Some(call.name.clone()),
                     created_at: now_ms(),
                 };
+                let key = format!("{}\u{0}{}", call.name, call.arguments);
+                if tool_msg.content.starts_with("Error:") {
+                    *repeated_failures.entry(key).or_insert(0) += 1;
+                } else {
+                    repeated_failures.remove(&key);
+                }
                 db.append_message(&tool_msg)?;
                 sink.message(session_id, &tool_msg).await;
                 history.push(to_chat_message(tool_msg));
+            }
+
+            if let Some((key, _)) = repeated_failures.iter().find(|(_, n)| **n >= REPEATED_FAILURE_LIMIT) {
+                let tool = key.split('\u{0}').next().unwrap_or("a tool");
+                self.pause_turn(
+                    session_id,
+                    &format!(
+                        "I stopped because the same `{tool}` call failed {REPEATED_FAILURE_LIMIT} times in a row. \
+                         Check the last error above, then press **Continue** or tell me how to proceed."
+                    ),
+                    &sink,
+                    &db,
+                    &mut history,
+                )
+                .await?;
+                break;
             }
 
             if cancel.is_cancelled() {
@@ -751,6 +790,33 @@ impl AgentRuntime {
 
         let _ = db.touch_session(session_id);
         sink.status(session_id, ChatStatus::Idle, None).await;
+        Ok(())
+    }
+
+    /// End the turn early with a visible assistant note (rather than an
+    /// error) so the user can resume with "Continue". The note is persisted
+    /// after the last tool results, which keeps the history valid.
+    async fn pause_turn(
+        &self,
+        session_id: &str,
+        reason: &str,
+        sink: &Arc<dyn EventSink>,
+        db: &Arc<Db>,
+        history: &mut Vec<ChatMessage>,
+    ) -> Result<()> {
+        let msg = MessageRecord {
+            id: new_id(),
+            session_id: session_id.into(),
+            role: Role::Assistant,
+            content: format!("{PAUSE_MARKER} {reason}"),
+            tool_calls: vec![],
+            tool_call_id: None,
+            tool_name: None,
+            created_at: now_ms(),
+        };
+        db.append_message(&msg)?;
+        sink.message(session_id, &msg).await;
+        history.push(to_chat_message(msg));
         Ok(())
     }
 
@@ -1052,6 +1118,29 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
         panic!("runtime did not reach idle in time");
+    }
+
+    #[tokio::test]
+    async fn step_limit_pauses_with_a_note_instead_of_an_error() {
+        let (rt, sink, dir, session_id) = setup().await;
+        let mut settings = rt.db.get_settings().unwrap();
+        settings.max_iterations = 1;
+        rt.db.save_settings(&settings).unwrap();
+        rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Balanced);
+
+        // The mock answers "demo" with a tool call, so a second step is
+        // needed — which the limit of 1 forbids. (RecordingSink panics on
+        // any error event.)
+        rt.send_message(&session_id, "please demo create a file", &[]).await.unwrap();
+        wait_idle(&sink).await;
+
+        let messages = rt.db.list_messages(&session_id).unwrap();
+        let last = messages.last().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert!(last.content.starts_with(PAUSE_MARKER), "{}", last.content);
+        assert!(last.tool_calls.is_empty());
+        // The tool call before the note got its result, so history stays valid.
+        assert_eq!(messages[messages.len() - 2].role, Role::Tool);
     }
 
     #[tokio::test]

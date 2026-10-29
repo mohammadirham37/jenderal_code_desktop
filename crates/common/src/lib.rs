@@ -487,7 +487,7 @@ fn default_terminal_font() -> u32 {
     12
 }
 fn default_max_iterations() -> u32 {
-    30
+    100
 }
 fn default_credential_storage() -> String {
     "file".into()
