@@ -101,6 +101,28 @@ npx --yes @tauri-apps/cli@2 build --bundles app
 Hasil build ada di `target/release/bundle/macos/JenderalCode.app` (atau
 `target/debug/...` untuk `--debug`).
 
+### Distribusi ke Mac lain
+
+Build universal (Intel + Apple Silicon), ditandatangani ad-hoc lewat
+`bundle.macOS.signingIdentity: "-"`:
+
+```bash
+rustup target add x86_64-apple-darwin aarch64-apple-darwin
+cd apps/desktop && npx --yes @tauri-apps/cli@2 build --target universal-apple-darwin
+# → target/universal-apple-darwin/release/bundle/dmg/JenderalCode_<versi>_universal.dmg
+```
+
+Bagikan file **.dmg** (jangan build `--debug`, dan jangan menyalin `.app` mentah).
+Karena belum dinotarisasi Apple, di Mac tujuan pertama kali buka dengan klik kanan
+→ **Open**, atau hapus atribut karantina:
+
+```bash
+xattr -cr /Applications/JenderalCode.app
+```
+
+Untuk distribusi tanpa peringatan Gatekeeper, perlu sertifikat *Developer ID* +
+notarisasi (set `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` saat build).
+
 Data aplikasi tersimpan di:
 
 - macOS: `~/Library/Application Support/com.jenderalcode.desktop/`
