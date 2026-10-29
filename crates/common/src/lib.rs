@@ -464,7 +464,7 @@ pub struct AppSettings {
     /// Retention for session history in days; `None` keeps history forever.
     #[serde(default)]
     pub retention_days: Option<u32>,
-    #[serde(default)]
+    #[serde(default = "default_show_hidden_files")]
     pub show_hidden_files: bool,
     /// Where API keys are stored: "file" (0600 file in the app data dir, no
     /// OS password prompts — default) or "keychain" (OS credential vault;
@@ -486,6 +486,9 @@ fn default_editor_font() -> u32 {
 fn default_terminal_font() -> u32 {
     12
 }
+fn default_show_hidden_files() -> bool {
+    true
+}
 fn default_max_iterations() -> u32 {
     100
 }
@@ -505,7 +508,7 @@ impl Default for AppSettings {
             terminal_font_size: default_terminal_font(),
             max_iterations: default_max_iterations(),
             retention_days: None,
-            show_hidden_files: false,
+            show_hidden_files: true,
             credential_storage: default_credential_storage(),
             editor_word_wrap: default_editor_word_wrap(),
         }

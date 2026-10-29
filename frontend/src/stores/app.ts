@@ -66,7 +66,7 @@ export const useApp = create<AppState>((set, get) => ({
     terminal_font_size: 12,
     max_iterations: 100,
     retention_days: null,
-    show_hidden_files: false,
+    show_hidden_files: true,
     credential_storage: "file",
     editor_word_wrap: true,
   },

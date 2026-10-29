@@ -368,6 +368,10 @@ impl Workspace {
             if !show_hidden && name.starts_with('.') && name != ".github" {
                 continue;
             }
+            // OS metadata, never useful to open.
+            if name == ".DS_Store" {
+                continue;
+            }
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if is_dir && is_ignored_dir(&name) {
                 continue;

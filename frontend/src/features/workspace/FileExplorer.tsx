@@ -10,6 +10,8 @@ import {
   Folder as FolderIcon,
   RefreshCw,
   FilePlus,
+  Eye,
+  EyeOff,
   FolderPlus,
   Trash2,
 } from "lucide-react";
@@ -49,7 +51,9 @@ export function FileExplorer() {
   useEffect(() => {
     if (!root) return;
     setTree({});
-    void loadDir("");
+    // Reload the root and every expanded folder (e.g. after toggling
+    // hidden files), so open folders don't render empty.
+    for (const d of ["", ...Array.from(useEditor.getState().expandedDirs)]) void loadDir(d).catch(() => {});
   }, [root, loadDir]);
 
   // Refresh affected directories on fs change events.
@@ -95,7 +99,7 @@ export function FileExplorer() {
                 <ChevronRight size={12} className="shrink-0 text-neutral-500" />
               )}
               {iconFor(e.name, true)}
-              <span className="truncate">{e.name}</span>
+              <span className={`truncate ${e.name.startsWith(".") ? "opacity-60" : ""}`}>{e.name}</span>
             </button>
             {expanded && renderDir(key, depth + 1)}
           </div>
@@ -114,7 +118,7 @@ export function FileExplorer() {
           }}
         >
           {iconFor(e.name, false)}
-          <span className="truncate">{e.name}</span>
+          <span className={`truncate ${e.name.startsWith(".") ? "opacity-60" : ""}`}>{e.name}</span>
         </button>
       );
     });
@@ -142,6 +146,14 @@ export function FileExplorer() {
           Explorer
         </span>
         <div className="flex items-center gap-0.5">
+          <IconButton
+            title={showHidden ? "Hide hidden files" : "Show hidden files"}
+            aria-pressed={showHidden}
+            onClick={() => void useApp.getState().updateSettings({ show_hidden_files: !showHidden })}
+            className={`h-6 w-6 ${showHidden ? "text-indigo-400" : ""}`}
+          >
+            {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+          </IconButton>
           <IconButton title="New file" onClick={() => createItem(false)} className="h-6 w-6">
             <FilePlus size={12} />
           </IconButton>
