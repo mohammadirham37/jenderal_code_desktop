@@ -41,6 +41,7 @@ import { Badge, IconButton, Spinner } from "@/components/ui";
 import { TodoDock, ToolRunCard } from "./ToolRunCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { ContextMeter } from "./ContextMeter";
+import { confirmAction } from "@/lib/confirm";
 
 export type ChatVariant = "side" | "full";
 
@@ -225,7 +226,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
       return;
     }
     if (
-      window.confirm(
+      await confirmAction(
         `Restore ${cps.length} file(s) to their state before this session's agent edits? Current changes to those files will be overwritten.`,
       )
     ) {

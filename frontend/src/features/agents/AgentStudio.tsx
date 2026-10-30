@@ -4,6 +4,7 @@ import { Bot, Lock, Pencil, Plus, ShieldCheck, Trash2, Wrench } from "lucide-rea
 import { useChat } from "@/stores/chat";
 import { Badge, Button, EmptyState, Field, Modal, inputClass } from "@/components/ui";
 import type { AgentProfile, PolicyMode } from "@/lib/ipc";
+import { confirmAction } from "@/lib/confirm";
 
 const ALL_TOOLS = [
   "fs_read",
@@ -120,7 +121,7 @@ export function AgentStudio() {
                     variant="danger"
                     size="sm"
                     onClick={async () => {
-                      if (window.confirm(`Delete profile ${p.name}?`)) await deleteAgentProfile(p.id);
+                      if (await confirmAction(`Delete profile ${p.name}?`)) await deleteAgentProfile(p.id);
                     }}
                   >
                     <Trash2 size={11} />

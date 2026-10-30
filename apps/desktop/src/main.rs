@@ -4,6 +4,7 @@ mod agent_detect;
 mod agent_usage;
 mod browser;
 mod commands;
+mod quit;
 mod sink;
 mod state;
 mod terminal;
@@ -85,6 +86,12 @@ fn main() {
     tauri::Builder::default()
         .plugin(navigation_guard())
         .plugin(tauri_plugin_dialog::init())
+        .menu(quit::app_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == quit::QUIT_MENU_ID {
+                quit::ask(app);
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = handle
@@ -243,16 +250,31 @@ fn main() {
             commands::cli_agent_presets,
             commands::run_external_agent,
         ])
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } if !quit::confirmed() => {
+                api.prevent_close();
+                quit::ask(window.app_handle());
+            }
+            tauri::WindowEvent::Destroyed => {
                 if let Some(state) = window.app_handle().try_state::<AppState>() {
                     state.terminals.kill_all();
                     state.runtime.shutdown();
                 }
             }
+            _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("running JenderalCode Desktop");
+        .build(tauri::generate_context!())
+        .expect("building JenderalCode Desktop")
+        .run(|app, event| {
+            // ⌘Q / the app menu's Quit (code `None`); `exit(0)` after the
+            // user confirmed passes through.
+            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = event {
+                if !quit::confirmed() {
+                    api.prevent_exit();
+                    quit::ask(app);
+                }
+            }
+        });
 }
 
 #[cfg(test)]

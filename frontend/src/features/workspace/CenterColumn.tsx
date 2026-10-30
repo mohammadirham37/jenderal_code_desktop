@@ -9,6 +9,7 @@ import { CHAT_TAB, useCenterTabs, type CenterTab } from "@/stores/centerTabs";
 import { Button, IconButton } from "@/components/ui";
 import { LazyXtermView, PanelSuspense } from "./lazy";
 import { AgentUsageButton } from "./AgentUsage";
+import { confirmAction } from "@/lib/confirm";
 
 export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trailing?: ReactNode }) {
   const { tabs, activeId } = useCenterTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId })));
@@ -35,7 +36,7 @@ export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trail
               title={t.bypass ? `${t.title}: permission checks bypassed` : undefined}
               dim={t.exited}
               onClick={() => useCenterTabs.getState().setActive(t.id)}
-              onClose={() => confirmClose(t)}
+              onClose={() => void confirmClose(t)}
             />
           ))}
         </div>
@@ -61,8 +62,8 @@ export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trail
   );
 }
 
-function confirmClose(tab: CenterTab) {
-  if (tab.agentId && !tab.exited && !window.confirm(`Stop ${tab.title} and close its tab?`)) return;
+async function confirmClose(tab: CenterTab) {
+  if (tab.agentId && !tab.exited && !await confirmAction(`Stop ${tab.title} and close its tab?`)) return;
   void useCenterTabs.getState().close(tab.id);
 }
 

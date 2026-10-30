@@ -24,6 +24,7 @@ import {
   inputClass,
 } from "@/components/ui";
 import type { ModelInfo, ProviderConfig, ProviderKind } from "@/lib/ipc";
+import { confirmAction } from "@/lib/confirm";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
   openai_compatible: "OpenAI-compatible",
@@ -188,7 +189,7 @@ export function ProviderCenter() {
                       variant="danger"
                       size="sm"
                       onClick={async () => {
-                        if (window.confirm(`Delete provider ${p.name}? Its stored key will be removed too.`))
+                        if (await confirmAction(`Delete provider ${p.name}? Its stored key will be removed too.`))
                           await store.remove(p.id);
                       }}
                     >

@@ -360,6 +360,11 @@ impl AgentRuntime {
             .unwrap_or(false)
     }
 
+    /// Number of sessions with a running turn.
+    pub fn busy_count(&self) -> usize {
+        self.sessions.lock().unwrap().values().filter(|h| h.busy).count()
+    }
+
     /// Answer a pending approval request.
     pub async fn decide_approval(&self, approval_id: &str, approved: bool, grant: Option<Grant>) -> Result<()> {
         let pending = self.pending.lock().unwrap().remove(approval_id);

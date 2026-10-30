@@ -7,6 +7,7 @@ import { useApp } from "@/stores/app";
 import { useSkills } from "@/stores/skills";
 import { Button, IconButton, Spinner, Toggle, inputClass } from "@/components/ui";
 import { formatTokens } from "@/lib/format";
+import { confirmAction } from "@/lib/confirm";
 
 export function SkillsSettings() {
   const skills = useSkills((s) => s.skills);
@@ -134,8 +135,8 @@ export function SkillsSettings() {
                 <IconButton
                   title="Remove skill"
                   disabled={busy !== null}
-                  onClick={() => {
-                    if (window.confirm(`Remove skill "${s.name}"?`)) void run(`rm-${s.name}`, () => api.removeSkill(s.name), `Removed ${s.name}.`);
+                  onClick={async () => {
+                    if (await confirmAction(`Remove skill "${s.name}"?`)) void run(`rm-${s.name}`, () => api.removeSkill(s.name), `Removed ${s.name}.`);
                   }}
                 >
                   {busy === `rm-${s.name}` ? <Spinner className="h-3 w-3" /> : <Trash2 size={12} />}

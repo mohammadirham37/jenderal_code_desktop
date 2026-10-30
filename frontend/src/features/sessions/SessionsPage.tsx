@@ -6,6 +6,7 @@ import { useApp } from "@/stores/app";
 import { api, type SessionSummary } from "@/lib/ipc";
 import { Badge, Button, EmptyState, IconButton, inputClass } from "@/components/ui";
 import { formatRelative, truncate } from "@/lib/format";
+import { confirmAction } from "@/lib/confirm";
 
 export function SessionsPage() {
   const sessions = useChat((s) => s.sessions);
@@ -100,7 +101,7 @@ export function SessionsPage() {
               <IconButton
                 title="Delete"
                 onClick={async () => {
-                  if (window.confirm(`Delete session "${s.title}" and its history?`))
+                  if (await confirmAction(`Delete session "${s.title}" and its history?`))
                     await removeSession(s.id);
                 }}
               >

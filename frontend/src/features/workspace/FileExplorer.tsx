@@ -20,6 +20,7 @@ import { useEditor } from "@/stores/editor";
 import { useApp } from "@/stores/app";
 import { languageOf } from "@/lib/format";
 import { IconButton } from "@/components/ui";
+import { confirmAction } from "@/lib/confirm";
 
 function iconFor(name: string, isDir: boolean) {
   if (isDir) return <FolderIcon size={13} className="text-accent-600 dark:text-accent-400" />;
@@ -133,7 +134,7 @@ export function FileExplorer() {
 
   const deleteItem = async () => {
     if (!selected) return;
-    if (!window.confirm(`Delete ${selected}? This cannot be undone.`)) return;
+    if (!await confirmAction(`Delete ${selected}? This cannot be undone.`)) return;
     await api.fsDelete(selected);
     const parent = selected.includes("/") ? selected.slice(0, selected.lastIndexOf("/")) : "";
     void loadDir(parent);

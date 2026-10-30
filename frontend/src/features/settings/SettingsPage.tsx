@@ -21,6 +21,7 @@ import { formatCost, formatTokens } from "@/lib/format";
 import { AgentCliSettings } from "./AgentCliSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { confirmAction } from "@/lib/confirm";
 
 const SHORTCUTS: [string, string][] = [
   ["⌘K / Ctrl+K", "Command palette"],
@@ -44,7 +45,7 @@ export function SettingsPage() {
   const switchCredStorage = async (target: "file" | "keychain") => {
     const label = target === "keychain" ? "OS keychain" : "local file (0600)";
     if (
-      !window.confirm(
+      !await confirmAction(
         `Move stored API keys to the ${label}?\n\nExisting keys are migrated automatically. ` +
           (target === "keychain"
             ? "Note: macOS may ask for your login password once when moving keys into the keychain (unsigned builds)."
@@ -424,7 +425,7 @@ export function SettingsPage() {
                     onClick={async () => {
                       const days = parseInt(localStorage.getItem("jcode:retention-days") ?? "30", 10);
                       if (!Number.isFinite(days) || days < 1) return;
-                      if (!window.confirm(`Delete sessions not touched in the last ${days} days?`)) return;
+                      if (!await confirmAction(`Delete sessions not touched in the last ${days} days?`)) return;
                       const n = await api.applyRetention(days);
                       await updateSettings({ retention_days: days });
                       setMessage(`Deleted ${n} session(s) older than ${days} days.`);
@@ -438,7 +439,7 @@ export function SettingsPage() {
               <Button
                 variant="danger"
                 onClick={async () => {
-                  if (!window.confirm("Delete ALL session history? This cannot be undone.")) return;
+                  if (!await confirmAction("Delete ALL session history? This cannot be undone.")) return;
                   const n = await api.clearHistory();
                   setMessage(`Deleted ${n} session(s).`);
                   void refreshUsage();

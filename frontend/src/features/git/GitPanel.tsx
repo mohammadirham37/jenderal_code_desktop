@@ -13,6 +13,7 @@ import { api, type BranchInfo, type CommitInfo, type FileStatus } from "@/lib/ip
 import { useEditor } from "@/stores/editor";
 import { Button, EmptyState, IconButton, Spinner, inputClass } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
+import { confirmAction } from "@/lib/confirm";
 
 const KIND_LABEL: Record<string, string> = {
   modified: "M",
@@ -86,7 +87,7 @@ export function GitPanel() {
   };
 
   const discard = async (path: string) => {
-    if (!window.confirm(`Discard changes in ${path}? This cannot be undone.`)) return;
+    if (!await confirmAction(`Discard changes in ${path}? This cannot be undone.`)) return;
     await api.gitDiscard(path);
     await refresh();
   };
@@ -247,7 +248,7 @@ export function GitPanel() {
             <button
               key={b.name}
               onClick={async () => {
-                if (!b.current && window.confirm(`Checkout branch ${b.name}?`)) {
+                if (!b.current && await confirmAction(`Checkout branch ${b.name}?`)) {
                   await api.gitCheckoutBranch(b.name);
                   await refresh();
                 }

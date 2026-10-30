@@ -8,6 +8,7 @@ import { useChat } from "@/stores/chat";
 import { IconButton, Modal } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 import type { WorkspaceInfo } from "@/lib/ipc";
+import { confirmAction } from "@/lib/confirm";
 
 export function ChatSidebar() {
   const workspace = useApp((s) => s.workspace);
@@ -209,9 +210,9 @@ function HistoryModal({ open, onClose }: { open: boolean; onClose: () => void })
                     <button
                       title="Delete"
                       className="rounded p-0.5 text-neutral-500 hover:bg-red-500/20 hover:text-red-500"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        if (window.confirm(`Delete conversation "${s.title}"?`)) void useChat.getState().removeSession(s.id);
+                        if (await confirmAction(`Delete conversation "${s.title}"?`)) void useChat.getState().removeSession(s.id);
                       }}
                     >
                       <Trash2 size={11} />
