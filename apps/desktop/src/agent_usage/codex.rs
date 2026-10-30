@@ -1,6 +1,7 @@
-//! Codex writes its rate limits into every session log: `token_count`
-//! events in `~/.codex/sessions/**/rollout-*.jsonl` carry `rate_limits`.
-//! The newest event per limit is the latest known state.
+//! Codex limits: live from ChatGPT's `wham/usage` endpoint (what the Codex
+//! apps show) with the token in `~/.codex/auth.json`, read-only and never
+//! refreshed. Fallback: the `rate_limits` that every session log records
+//! (`token_count` events in `~/.codex/sessions/**/rollout-*.jsonl`).
 
 use jcode_common::{AgentUsageReport, AgentUsageStatus, UsageWindow};
 use serde_json::Value;
@@ -21,7 +22,72 @@ struct Limit {
     windows: Vec<(u64, f64, Option<i64>)>,
 }
 
-pub fn report(codex_dir: &Path, now: i64) -> AgentUsageReport {
+const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+
+pub async fn report(codex_dir: &Path, now: i64) -> AgentUsageReport {
+    let auth = std::fs::read_to_string(codex_dir.join("auth.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    if let Some(live) = match auth {
+        Some(a) => fetch_live(&a).await,
+        None => None,
+    } {
+        if let Some(r) = parse_live(&live, now) {
+            return r;
+        }
+    }
+    let dir = codex_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || report_from_logs(&dir, now))
+        .await
+        .unwrap_or_else(|_| AgentUsageReport::new("codex", "Codex", AgentUsageStatus::Error))
+}
+
+async fn fetch_live(auth: &Value) -> Option<Value> {
+    let token = auth.pointer("/tokens/access_token")?.as_str()?;
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().ok()?;
+    let mut req = client
+        .get(USAGE_URL)
+        .bearer_auth(token)
+        .header("user-agent", "codex-cli")
+        .header("OpenAI-Beta", "codex-1");
+    if let Some(account) = auth.pointer("/tokens/account_id").and_then(Value::as_str) {
+        req = req.header("ChatGPT-Account-Id", account);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json().await.ok()
+}
+
+/// Report from a `wham/usage` response.
+fn parse_live(v: &Value, now: i64) -> Option<AgentUsageReport> {
+    let plan = v["plan_type"].as_str()?;
+    let mut report = AgentUsageReport::new("codex", "Codex", AgentUsageStatus::Ok);
+    report.plan = Some(plan_label(plan));
+    report.account = v["email"].as_str().map(String::from);
+    let mut add = |prefix: &str, rl: &Value| {
+        for key in ["primary_window", "secondary_window"] {
+            let Some(w) = rl.get(key).filter(|w| w.is_object()) else { continue };
+            let Some(used) = w["used_percent"].as_f64() else { continue };
+            let minutes = w["limit_window_seconds"].as_u64().map(|s| s.div_ceil(60)).unwrap_or(0);
+            report.windows.push(UsageWindow {
+                label: format!("{prefix}{}", if minutes > 0 { window_label(minutes) } else { "Limit".into() }),
+                used_percent: Some(used),
+                resets_at: w["reset_at"].as_i64().map(|s| s * 1000).filter(|r| *r > now),
+                detail: None,
+            });
+        }
+    };
+    add("", &v["rate_limit"]);
+    for extra in v["additional_rate_limits"].as_array().into_iter().flatten() {
+        let name = extra["limit_name"].as_str().or(extra["metered_feature"].as_str()).unwrap_or("Other");
+        add(&format!("{name} · "), &extra["rate_limit"]);
+    }
+    Some(report)
+}
+
+fn report_from_logs(codex_dir: &Path, now: i64) -> AgentUsageReport {
     let mut limits: BTreeMap<String, Limit> = BTreeMap::new();
     for file in newest_session_files(&codex_dir.join("sessions"), MAX_FILES) {
         let Ok(text) = std::fs::read_to_string(&file) else { continue };
@@ -106,6 +172,7 @@ fn build_report(limits: BTreeMap<String, Limit>, now: i64) -> AgentUsageReport {
 fn window_label(minutes: u64) -> String {
     match minutes {
         10_080 => "Weekly limit".into(),
+        43_200 => "Monthly limit".into(),
         m if m % 1_440 == 0 => format!("{}-day limit", m / 1_440),
         m if m % 60 == 0 => format!("{}-hour limit", m / 60),
         m => format!("{m}-minute limit"),
@@ -164,7 +231,7 @@ mod tests {
         ];
         std::fs::write(day.join("rollout-a.jsonl"), lines.join("\n")).unwrap();
 
-        let r = report(dir.path(), now);
+        let r = report_from_logs(dir.path(), now);
         assert_eq!(r.status, AgentUsageStatus::Ok);
         assert_eq!(r.plan.as_deref(), Some("Pro Lite"));
         assert_eq!(r.windows.len(), 2);
@@ -181,7 +248,28 @@ mod tests {
     #[test]
     fn no_sessions_is_unavailable() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(report(dir.path(), 0).status, AgentUsageStatus::Unavailable);
+        assert_eq!(report_from_logs(dir.path(), 0).status, AgentUsageStatus::Unavailable);
+    }
+
+    #[test]
+    fn parses_live_usage() {
+        let v = serde_json::json!({
+            "email": "me@example.com",
+            "plan_type": "free",
+            "rate_limit": {
+                "primary_window": {"used_percent": 12, "limit_window_seconds": 2592000, "reset_at": 1795950938},
+                "secondary_window": null
+            },
+            "additional_rate_limits": null
+        });
+        let r = parse_live(&v, 1_790_000_000_000).unwrap();
+        assert_eq!(r.plan.as_deref(), Some("Free"));
+        assert_eq!(r.account.as_deref(), Some("me@example.com"));
+        assert_eq!(r.windows.len(), 1);
+        assert_eq!(r.windows[0].label, "Monthly limit");
+        assert_eq!(r.windows[0].used_percent, Some(12.0));
+        assert_eq!(r.windows[0].resets_at, Some(1_795_950_938_000));
+        assert!(parse_live(&serde_json::json!({"detail": "unauthorized"}), 0).is_none());
     }
 
     #[test]

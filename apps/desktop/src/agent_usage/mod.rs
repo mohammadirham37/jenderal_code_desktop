@@ -1,9 +1,9 @@
 //! Subscription usage of external agent CLIs (Claude Code, Codex,
 //! Antigravity, OpenCode) for the chat column's Usage popover.
 //!
-//! Everything is read-only: each CLI's local files, plus Claude Code's usage
-//! endpoint called with its stored login token. Tokens are never refreshed,
-//! so the CLIs' own logins stay intact.
+//! Everything is read-only: each CLI's local files and usage commands, plus
+//! the Claude Code and Codex usage endpoints called with their stored login
+//! tokens. Tokens are never refreshed, so the CLIs' own logins stay intact.
 
 mod antigravity;
 mod claude;
@@ -23,23 +23,24 @@ pub async fn collect() -> Vec<AgentUsageReport> {
         let home = home.clone();
         tokio::task::spawn_blocking(move || {
             let installed = crate::agent_detect::detect(&["claude".into(), "codex".into(), "agy".into(), "opencode".into()]);
-            let reports = home.map(|h| {
-                (
-                    codex::report(&h.join(".codex"), now),
-                    antigravity::report(&h),
-                    opencode::report(&opencode::db_path(&h), now),
-                )
-            });
+            let reports = home.map(|h| (antigravity::report(&h), opencode::report(&opencode::db_path(&h), now)));
             (installed, reports)
         })
     };
-    let claude = claude::report(home.as_deref(), now).await;
+    let claude = claude::report(home.as_deref(), now);
+    let codex = async {
+        match &home {
+            Some(h) => Some(codex::report(&h.join(".codex"), now).await),
+            None => None,
+        }
+    };
+    let (claude, codex) = tokio::join!(claude, codex);
     let (installed, reports) = local.await.unwrap_or_else(|_| (vec![false; 4], None));
 
     let mut out = vec![claude];
-    match reports {
-        Some((codex, antigravity, opencode)) => out.extend([codex, antigravity, opencode]),
-        None => {
+    match (codex, reports) {
+        (Some(codex), Some((antigravity, opencode))) => out.extend([codex, antigravity, opencode]),
+        _ => {
             for (id, name) in [("codex", "Codex"), ("antigravity", "Antigravity"), ("opencode", "OpenCode")] {
                 out.push(AgentUsageReport::new(id, name, AgentUsageStatus::Error).with_note("Home directory not found."));
             }
