@@ -30,6 +30,21 @@ const THEME = {
   brightCyan: "#7fd3dc",
 };
 
+/** The app's mono stack as a literal string: xterm measures with canvas,
+ *  where `var(--font-mono)` is invalid. */
+function monoFamily(): string {
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() ||
+    '"IBM Plex Mono", ui-monospace, monospace'
+  );
+}
+
+/** Web fonts load lazily; measuring before they arrive sizes cells for the
+ *  fallback font. */
+const fontsReady: Promise<unknown> = Promise.all(
+  ["400", "600"].map((w) => document.fonts.load(`${w} 12px "IBM Plex Mono"`)),
+).catch(() => {});
+
 function listen() {
   if (listening) return;
   listening = true;
@@ -48,7 +63,15 @@ export function ensureXterm(id: string, fontSize: number): Entry {
   listen();
   let entry = entries.get(id);
   if (!entry) {
-    const term = new XTerm({ fontSize, fontFamily: "var(--font-mono)", cursorBlink: true, theme: THEME });
+    const term = new XTerm({
+      fontSize,
+      fontFamily: monoFamily(),
+      fontWeight: "400",
+      fontWeightBold: "600",
+      lineHeight: 1.2,
+      cursorBlink: true,
+      theme: THEME,
+    });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.onData((data) => void api.terminalWrite(id, data).catch(() => {}));
@@ -65,12 +88,20 @@ export function ensureXterm(id: string, fontSize: number): Entry {
 export function attachXterm(id: string, host: HTMLElement, fontSize: number) {
   const entry = ensureXterm(id, fontSize);
   if (entry.el.parentElement !== host) host.appendChild(entry.el);
-  if (!entry.opened) {
+  entry.term.options.fontSize = fontSize;
+  if (entry.opened) {
+    fitXterm(id);
+    return;
+  }
+  void fontsReady.then(() => {
+    // Skip if the tab was closed (or already opened) while fonts loaded.
+    if (entry.opened || entries.get(id) !== entry) return;
     entry.term.open(entry.el);
     entry.opened = true;
-  }
-  entry.term.options.fontSize = fontSize;
-  fitXterm(id);
+    fitXterm(id);
+    // The view's focus-on-activate ran before the terminal existed.
+    if (entry.el.clientWidth > 0) entry.term.focus();
+  });
 }
 
 /** Refit to the host; skipped while hidden (zero size). */
