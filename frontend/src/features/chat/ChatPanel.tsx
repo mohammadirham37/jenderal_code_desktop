@@ -223,7 +223,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
     [chat.messages, chat.toolRuns, chat.approvals],
   );
   const empty = timeline.length === 0 && !chat.hasStreaming;
-  const column = full ? "mx-auto w-full max-w-3xl" : "";
+  const column = full ? "mx-auto w-full max-w-4xl 2xl:max-w-5xl" : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white dark:bg-neutral-950">
@@ -295,7 +295,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
 
       {/* Messages */}
       <ScrollFollow busy={busy} streaming={chat.hasStreaming}>
-        <div className={`${column} ${full ? "px-6 py-6" : "px-3 py-3"}`}>
+        <div className={`${column} ${full ? "px-6 py-6 lg:px-8" : "px-3 py-3"}`}>
           {empty && workspace && (
             <EmptyChat full={full} onPick={(s) => void send(s)} disabled={busy || !chat.activeSessionId} />
           )}
@@ -896,7 +896,7 @@ const MessageBubble = memo(function MessageBubble({
         </div>
         <div
           className={`whitespace-pre-wrap break-words rounded-[5px] border border-neutral-200 bg-white px-3 py-2 text-neutral-800 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100 ${
-            full ? "max-w-[85%] text-[13px]" : "w-full text-xs"
+            full ? "max-w-[80%] text-[13px]" : "w-full text-xs"
           }`}
         >
           {skillUse ? (
