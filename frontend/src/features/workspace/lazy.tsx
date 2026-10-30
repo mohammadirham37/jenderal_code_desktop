@@ -7,6 +7,9 @@ export const LazyEditorPane = lazy(() => import("./EditorPane").then((m) => ({ d
 export const LazyTerminalPanel = lazy(() =>
   import("@/features/terminal/TerminalPanel").then((m) => ({ default: m.TerminalPanel })),
 );
+export const LazyXtermView = lazy(() =>
+  import("@/features/terminal/XtermView").then((m) => ({ default: m.XtermView })),
+);
 export const LazyGitPanel = lazy(() => import("@/features/git/GitPanel").then((m) => ({ default: m.GitPanel })));
 
 export function PanelSuspense({ children }: { children: ReactNode }) {
