@@ -493,6 +493,66 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
     .collect()
 }
 
+/// State of one agent CLI's usage report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentUsageStatus {
+    Ok,
+    NotInstalled,
+    NotSignedIn,
+    /// The stored login token expired; the CLI refreshes it when next used.
+    Expired,
+    /// The agent does not expose usage outside its own UI.
+    Unavailable,
+    Error,
+}
+
+/// One usage window (e.g. a 5-hour or weekly limit, or an activity total).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageWindow {
+    pub label: String,
+    /// Share of the limit used, 0-100. `None` for activity without a limit.
+    pub used_percent: Option<f64>,
+    /// When the window resets (Unix ms).
+    pub resets_at: Option<i64>,
+    /// Extra text, e.g. "83k tokens · $0.12".
+    pub detail: Option<String>,
+}
+
+/// Subscription/usage report for one external agent CLI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentUsageReport {
+    pub id: String,
+    pub name: String,
+    pub status: AgentUsageStatus,
+    pub plan: Option<String>,
+    pub account: Option<String>,
+    pub windows: Vec<UsageWindow>,
+    pub note: Option<String>,
+    /// When the data was recorded (Unix ms), if older than "now".
+    pub updated_at: Option<i64>,
+}
+
+impl AgentUsageReport {
+    pub fn new(id: &str, name: &str, status: AgentUsageStatus) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            status,
+            plan: None,
+            account: None,
+            windows: Vec::new(),
+            note: None,
+            updated_at: None,
+        }
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "default_theme")]

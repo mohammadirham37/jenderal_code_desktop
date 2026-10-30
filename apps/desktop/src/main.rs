@@ -1,6 +1,7 @@
 //! JenderalCode Desktop — Tauri application entry point.
 
 mod agent_detect;
+mod agent_usage;
 mod browser;
 mod commands;
 mod sink;
@@ -232,6 +233,7 @@ fn main() {
             commands::terminal_kill,
             commands::terminal_list,
             commands::detect_agent_clis,
+            commands::agent_usage,
             // External agents
             commands::cli_agent_presets,
             commands::run_external_agent,

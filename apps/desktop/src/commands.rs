@@ -984,6 +984,13 @@ pub fn terminal_list(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     Ok(state.terminals.list())
 }
 
+/// Subscription usage of external agent CLIs (Claude Code, Codex, ...).
+/// Blocking parts run in `spawn_blocking` inside `collect`.
+#[tauri::command]
+pub async fn agent_usage() -> CmdResult<Vec<AgentUsageReport>> {
+    Ok(crate::agent_usage::collect().await)
+}
+
 #[tauri::command]
 pub async fn detect_agent_clis(commands: Vec<String>) -> CmdResult<Vec<bool>> {
     blocking(move || Ok(crate::agent_detect::detect(&commands))).await
