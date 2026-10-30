@@ -468,6 +468,10 @@ pub struct AgentCli {
     pub command: String,
     #[serde(default = "default_agent_enabled")]
     pub enabled: bool,
+    /// Flags appended when the user opens the agent "with bypass
+    /// permissions" (e.g. `--dangerously-skip-permissions`).
+    #[serde(default)]
+    pub bypass_args: Option<String>,
 }
 
 fn default_agent_enabled() -> bool {
@@ -476,20 +480,21 @@ fn default_agent_enabled() -> bool {
 
 pub fn default_agent_clis() -> Vec<AgentCli> {
     [
-        ("claude", "Claude", "claude"),
-        ("codex", "Codex", "codex"),
-        ("opencode", "OpenCode", "opencode"),
-        ("antigravity", "Antigravity", "agy"),
-        ("gemini", "Gemini", "gemini"),
-        ("goose", "Goose", "goose session"),
-        ("aider", "Aider", "aider"),
+        ("claude", "Claude", "claude", Some("--dangerously-skip-permissions")),
+        ("codex", "Codex", "codex", Some("--dangerously-bypass-approvals-and-sandbox")),
+        ("opencode", "OpenCode", "opencode", Some("--auto")),
+        ("antigravity", "Antigravity", "agy", Some("--dangerously-skip-permissions")),
+        ("gemini", "Gemini", "gemini", None),
+        ("goose", "Goose", "goose session", None),
+        ("aider", "Aider", "aider", None),
     ]
     .into_iter()
-    .map(|(id, name, command)| AgentCli {
+    .map(|(id, name, command, bypass)| AgentCli {
         id: id.into(),
         name: name.into(),
         command: command.into(),
         enabled: true,
+        bypass_args: bypass.map(String::from),
     })
     .collect()
 }
@@ -674,6 +679,8 @@ mod tests {
         let ids: Vec<&str> = s.agent_clis.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "gemini", "goose", "aider"]);
         assert!(s.agent_clis.iter().all(|a| a.enabled));
+        let claude = &s.agent_clis[0];
+        assert_eq!(claude.bypass_args.as_deref(), Some("--dangerously-skip-permissions"));
         assert_eq!(AppSettings::default().agent_clis, default_agent_clis());
     }
 

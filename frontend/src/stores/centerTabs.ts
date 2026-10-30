@@ -13,6 +13,8 @@ export interface CenterTab {
   /** Agent CLI command; absent for a plain shell. */
   command?: string;
   agentId?: string;
+  /** Opened with the agent's bypass-permission flags. */
+  bypass?: boolean;
   exited: boolean;
   error?: string;
 }
@@ -24,7 +26,7 @@ interface CenterTabsState {
   installed: Record<string, boolean> | null;
   setActive: (id: string) => void;
   openTerminal: () => Promise<void>;
-  openAgent: (agent: AgentCli) => Promise<void>;
+  openAgent: (agent: AgentCli, bypass?: boolean) => Promise<void>;
   restart: (id: string) => Promise<void>;
   close: (id: string) => Promise<void>;
   detectInstalled: () => Promise<void>;
@@ -72,8 +74,17 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
       return open({ id: newTabId(), title: `shell ${n}`, exited: false });
     },
 
-    openAgent: (agent) =>
-      open({ id: newTabId(), title: agent.name, command: agent.command, agentId: agent.id, exited: false }),
+    openAgent: (agent, bypass = false) => {
+      const flags = bypass ? agent.bypass_args?.trim() : "";
+      return open({
+        id: newTabId(),
+        title: agent.name,
+        command: flags ? `${agent.command} ${flags}` : agent.command,
+        agentId: agent.id,
+        bypass: !!flags,
+        exited: false,
+      });
+    },
 
     restart: async (id) => {
       const tab = get().tabs.find((t) => t.id === id);

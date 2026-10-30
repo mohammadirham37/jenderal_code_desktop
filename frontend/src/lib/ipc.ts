@@ -168,6 +168,8 @@ export interface AgentCli {
   name: string;
   command: string;
   enabled: boolean;
+  /** Flags appended when opened "with bypass permissions". */
+  bypass_args?: string | null;
 }
 
 export interface AppSettings {

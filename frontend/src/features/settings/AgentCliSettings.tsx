@@ -41,6 +41,16 @@ export function AgentCliSettings() {
               onBlur={() => save(draft)}
             />
           </div>
+          <div className="w-52 shrink-0">
+            <input
+              className={`${inputClass} font-mono`}
+              value={a.bypass_args ?? ""}
+              placeholder="bypass flags (optional)"
+              title="Appended when you open the agent with bypass permissions"
+              onChange={(e) => edit(i, { bypass_args: e.target.value })}
+              onBlur={() => save(draft)}
+            />
+          </div>
           <IconButton title="Remove" onClick={() => save(draft.filter((_, j) => j !== i))}>
             <Trash2 size={12} />
           </IconButton>
@@ -49,7 +59,10 @@ export function AgentCliSettings() {
       <Button
         size="sm"
         onClick={() =>
-          save([...draft, { id: `custom-${Date.now().toString(36)}`, name: "New agent", command: "", enabled: true }])
+          save([
+            ...draft,
+            { id: `custom-${Date.now().toString(36)}`, name: "New agent", command: "", enabled: true, bypass_args: null },
+          ])
         }
       >
         <Plus size={12} /> Add agent

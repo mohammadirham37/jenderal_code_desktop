@@ -623,7 +623,10 @@ impl AgentRuntime {
             // --------------------------------------------------------------
             // Stream the response.
             // --------------------------------------------------------------
-            sink.status(session_id, ChatStatus::Streaming, None).await;
+            // Status stays "thinking" until the first answer text or tool
+            // call: reasoning models (and gateways that hide reasoning) can
+            // think for a long time before producing output.
+            let mut answering = false;
             let assistant_id = new_id();
             let mut text = String::new();
             let mut reasoning = String::new();
@@ -637,6 +640,10 @@ impl AgentRuntime {
                     ev = stream.next() => {
                         match ev {
                             Some(StreamEvent::TextDelta(t)) => {
+                                if !answering && !t.is_empty() {
+                                    answering = true;
+                                    sink.status(session_id, ChatStatus::Streaming, None).await;
+                                }
                                 text.push_str(&t);
                                 sink.delta(session_id, &assistant_id, &t).await;
                             }
@@ -645,6 +652,10 @@ impl AgentRuntime {
                                 sink.reasoning_delta(session_id, &assistant_id, &t).await;
                             }
                             Some(StreamEvent::ToolCallDelta { index, id, name, arguments_delta }) => {
+                                if !answering {
+                                    answering = true;
+                                    sink.status(session_id, ChatStatus::Streaming, None).await;
+                                }
                                 while tool_calls.len() <= index {
                                     tool_calls.push(ToolCall { id: String::new(), name: String::new(), arguments: String::new() });
                                 }

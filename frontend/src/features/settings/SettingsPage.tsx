@@ -226,7 +226,8 @@ export function SettingsPage() {
             </h2>
             <p className="mb-3 text-[11px] text-neutral-500">
               Shown in the + menu of the chat column. Each command runs in a terminal tab through your login
-              shell, so it uses your PATH and the CLI's own login.
+              shell, so it uses your PATH and the CLI's own login. Bypass flags are added only when you choose
+              "bypass" in the menu; the agent then runs without asking before edits or commands.
             </p>
             <AgentCliSettings />
           </section>

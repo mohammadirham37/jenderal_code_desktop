@@ -18,6 +18,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("005_show_hidden_files", include_str!("../migrations/005_show_hidden_files.sql")),
     ("006_message_reasoning", include_str!("../migrations/006_message_reasoning.sql")),
     ("007_antigravity_agent", include_str!("../migrations/007_antigravity_agent.sql")),
+    ("008_agent_bypass_args", include_str!("../migrations/008_agent_bypass_args.sql")),
 ];
 
 pub struct Db {
@@ -1237,6 +1238,32 @@ mod tests {
         }
         let ids: Vec<String> = d.get_settings().unwrap().agent_clis.into_iter().map(|a| a.id).collect();
         assert_eq!(ids, ["claude", "codex", "antigravity"]);
+    }
+
+    #[test]
+    fn bypass_args_are_filled_into_saved_agent_lists() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        for a in &mut settings.agent_clis {
+            a.bypass_args = None;
+        }
+        // A value the user chose is kept.
+        settings.agent_clis[1].bypass_args = Some("--full-auto".into());
+        d.save_settings(&settings).unwrap();
+
+        let sql = include_str!("../migrations/008_agent_bypass_args.sql");
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(sql)?)).unwrap();
+        }
+        let agents = d.get_settings().unwrap().agent_clis;
+        let ids: Vec<&str> = agents.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "gemini", "goose", "aider"]);
+        let bypass = |id: &str| agents.iter().find(|a| a.id == id).unwrap().bypass_args.clone();
+        assert_eq!(bypass("claude").as_deref(), Some("--dangerously-skip-permissions"));
+        assert_eq!(bypass("codex").as_deref(), Some("--full-auto"));
+        assert_eq!(bypass("opencode").as_deref(), Some("--auto"));
+        assert_eq!(bypass("antigravity").as_deref(), Some("--dangerously-skip-permissions"));
+        assert_eq!(bypass("gemini"), None);
     }
 
     #[test]

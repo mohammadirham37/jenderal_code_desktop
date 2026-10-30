@@ -2,7 +2,7 @@
  *  agent-CLI tabs opened from the "+" menu. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Bot, MessageSquare, Plus, RotateCcw, Settings, Terminal as TerminalIcon, X } from "lucide-react";
+import { Bot, MessageSquare, Plus, RotateCcw, Settings, ShieldOff, Terminal as TerminalIcon, X } from "lucide-react";
 import { ChatPanel } from "@/features/chat/ChatPanel";
 import { useApp } from "@/stores/app";
 import { CHAT_TAB, useCenterTabs, type CenterTab } from "@/stores/centerTabs";
@@ -29,8 +29,9 @@ export function CenterColumn({ trailing }: { trailing?: ReactNode }) {
             <TabButton
               key={t.id}
               active={t.id === activeId}
-              icon={t.agentId ? <Bot size={12} /> : <TerminalIcon size={12} />}
+              icon={t.bypass ? <ShieldOff size={12} className="text-red-500" /> : t.agentId ? <Bot size={12} /> : <TerminalIcon size={12} />}
               label={t.title}
+              title={t.bypass ? `${t.title}: permission checks bypassed` : undefined}
               dim={t.exited}
               onClick={() => useCenterTabs.getState().setActive(t.id)}
               onClose={() => confirmClose(t)}
@@ -89,6 +90,7 @@ function TabButton({
   icon,
   label,
   dim,
+  title,
   onClick,
   onClose,
 }: {
@@ -96,12 +98,14 @@ function TabButton({
   icon: ReactNode;
   label: string;
   dim?: boolean;
+  title?: string;
   onClick: () => void;
   onClose?: () => void;
 }) {
   return (
     <div
       onClick={onClick}
+      title={title}
       className={`group -mb-px flex shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-2.5 font-mono text-[10.5px] tracking-wide transition-colors ${
         active
           ? "border-accent-500 text-neutral-900 dark:text-neutral-100"
@@ -171,15 +175,28 @@ function NewTabMenu() {
           {enabled.length > 0 && <MenuDivider />}
           {enabled.map((a) => {
             const missing = installed?.[a.id] === false;
+            const bypass = a.bypass_args?.trim();
             return (
-              <MenuItem
-                key={a.id}
-                icon={<Bot size={13} />}
-                label={a.name}
-                hint={missing ? "not installed" : installed === null ? "…" : undefined}
-                dim={missing}
-                onClick={() => run(() => void useCenterTabs.getState().openAgent(a))}
-              />
+              <div key={a.id} className="group/agent flex items-center gap-0.5">
+                <div className="min-w-0 flex-1">
+                  <MenuItem
+                    icon={<Bot size={13} />}
+                    label={a.name}
+                    hint={missing ? "not installed" : installed === null ? "…" : undefined}
+                    dim={missing}
+                    onClick={() => run(() => void useCenterTabs.getState().openAgent(a))}
+                  />
+                </div>
+                {bypass && (
+                  <button
+                    title={`Open with bypass permissions: ${a.command} ${bypass}`}
+                    onClick={() => run(() => void useCenterTabs.getState().openAgent(a, true))}
+                    className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1.5 font-mono text-[10px] text-neutral-500 transition-colors hover:bg-red-500/10 hover:text-red-500"
+                  >
+                    <ShieldOff size={12} /> bypass
+                  </button>
+                )}
+              </div>
             );
           })}
           <MenuDivider />
