@@ -450,18 +450,30 @@ impl Workspace {
 
     /// Content search across the workspace, respecting .gitignore.
     pub fn search(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
-        let re = if query.is_regex {
-            Some(regex::Regex::new(&query.query).context("invalid regex")?)
+        let pattern = if query.is_regex { query.query.clone() } else { regex::escape(&query.query) };
+        let re = if query.is_regex || query.case_insensitive {
+            Some(
+                regex::RegexBuilder::new(&pattern)
+                    .case_insensitive(query.case_insensitive)
+                    .build()
+                    .context("invalid regex")?,
+            )
         } else {
             None
         };
         let literal = query.query.clone();
+        let max_results = query.max_results.unwrap_or(MAX_SEARCH_RESULTS).clamp(1, 500);
+        let context = query.context_lines.min(5);
+        let start = match query.path.as_deref().filter(|p| !p.trim().is_empty()) {
+            Some(p) => self.resolve(p)?,
+            None => self.root.clone(),
+        };
         let include = query
             .include_glob
             .as_ref()
             .map(|g| Pattern::new(g).context("invalid include glob"))
             .transpose()?;
-        let walker = WalkBuilder::new(&self.root)
+        let walker = WalkBuilder::new(&start)
             .hidden(true)
             .git_ignore(true)
             .git_exclude(true)
@@ -475,7 +487,7 @@ impl Workspace {
             .build();
         let mut hits = Vec::new();
         for entry in walker.flatten() {
-            if hits.len() >= MAX_SEARCH_RESULTS {
+            if hits.len() >= max_results {
                 break;
             }
             let path = entry.path();
@@ -494,19 +506,22 @@ impl Workspace {
                 }
             }
             let Ok(content) = fs::read_to_string(path) else { continue };
-            for (i, line) in content.lines().enumerate() {
+            let lines: Vec<&str> = content.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
                 let matched = match &re {
                     Some(re) => re.is_match(line),
                     None => line.contains(&literal),
                 };
                 if matched {
-                    let line = if line.len() > 300 { &line[..300] } else { line };
+                    let around = |r: std::ops::Range<usize>| lines[r].iter().map(|l| clip_line(l, 300)).collect();
                     hits.push(SearchHit {
                         path: rel.clone(),
                         line_number: Some(i as u64 + 1),
-                        line: line.to_string(),
+                        line: clip_line(line, 300),
+                        before: around(i.saturating_sub(context)..i),
+                        after: around(i + 1..(i + 1 + context).min(lines.len())),
                     });
-                    if hits.len() >= MAX_SEARCH_RESULTS {
+                    if hits.len() >= max_results {
                         break;
                     }
                 }
@@ -551,13 +566,36 @@ impl Workspace {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchQuery {
     pub query: String,
     #[serde(default)]
     pub is_regex: bool,
     #[serde(default)]
     pub include_glob: Option<String>,
+    #[serde(default)]
+    pub case_insensitive: bool,
+    /// Lines of context before and after each match (capped at 5).
+    #[serde(default)]
+    pub context_lines: usize,
+    /// Directory or file (workspace-relative) to search within.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Result cap (default [`MAX_SEARCH_RESULTS`], at most 500).
+    #[serde(default)]
+    pub max_results: Option<usize>,
+}
+
+/// At most `max` bytes of `line`, cut on a char boundary.
+fn clip_line(line: &str, max: usize) -> String {
+    if line.len() <= max {
+        return line.to_string();
+    }
+    let mut end = max;
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    line[..end].to_string()
 }
 
 /// Render a unified diff between two file contents.
@@ -960,6 +998,34 @@ mod tests {
     }
 
     #[test]
+    fn search_supports_case_context_path_and_limit() {
+        let (_t, w) = ws();
+        w.write_file("src/a.rs", "one\nTwo Needle\nthree\nfour\n").unwrap();
+        w.write_file("other/b.rs", "needle\n").unwrap();
+        w.write_file("src/long.txt", &format!("{}needle\n", "é".repeat(400))).unwrap();
+        let q = |f: fn(&mut SearchQuery)| {
+            let mut q = SearchQuery { query: "needle".into(), ..Default::default() };
+            f(&mut q);
+            w.search(&q).unwrap()
+        };
+        // Case-sensitive literal by default.
+        assert!(q(|_| {}).iter().all(|h| h.path != "src/a.rs"));
+        let hits = q(|q| {
+            q.case_insensitive = true;
+            q.context_lines = 1;
+            q.path = Some("src".into());
+        });
+        let a = hits.iter().find(|h| h.path == "src/a.rs").unwrap();
+        assert_eq!(a.line_number, Some(2));
+        assert_eq!(a.before, vec!["one"]);
+        assert_eq!(a.after, vec!["three"]);
+        assert!(hits.iter().all(|h| h.path.starts_with("src/")));
+        // Long multi-byte lines are clipped without panicking.
+        assert!(hits.iter().any(|h| h.path == "src/long.txt" && h.line.len() <= 300));
+        assert_eq!(q(|q| { q.case_insensitive = true; q.max_results = Some(1); }).len(), 1);
+    }
+
+    #[test]
     fn search_respects_gitignore_and_finds_matches() {
         let (t, w) = ws();
         w.write_file("src/lib.rs", "fn find_me() {}\n").unwrap();
@@ -971,6 +1037,7 @@ mod tests {
                 query: "find_me".into(),
                 is_regex: false,
                 include_glob: None,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(hits.len(), 1);
@@ -981,6 +1048,7 @@ mod tests {
                 query: "nothing".into(),
                 is_regex: false,
                 include_glob: None,
+                ..Default::default()
             })
             .unwrap();
         assert!(hits.is_empty(), "gitignored docs/ should be skipped");
@@ -1101,7 +1169,7 @@ mod tests {
             std::os::unix::fs::symlink(outside.path(), t.path().join("linkdir")).unwrap();
             // Keep the tempdir alive for the search below.
             let hits = w
-                .search(&SearchQuery { query: "needle".into(), is_regex: false, include_glob: None })
+                .search(&SearchQuery { query: "needle".into(), ..Default::default() })
                 .unwrap();
             let paths: Vec<_> = hits.iter().map(|h| h.path.as_str()).collect();
             assert_eq!(paths, vec!["src/a.rs"]);

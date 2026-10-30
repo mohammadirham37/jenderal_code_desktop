@@ -228,6 +228,7 @@ pub async fn fs_search(
             query,
             is_regex: is_regex.unwrap_or(false),
             include_glob,
+            ..Default::default()
         })
         .map_err(err)
     })

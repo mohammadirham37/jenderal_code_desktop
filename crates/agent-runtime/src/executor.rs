@@ -100,11 +100,16 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
         ),
         spec(
             "fs_search",
-            "Search file contents across the workspace (respects .gitignore). Returns path:line matches.",
+            "Search file contents across the workspace (respects .gitignore). Returns `path:line: text` matches; \
+             with context_lines, surrounding lines are shown as `path-line- text`.",
             json!({
                 "query": {"type": "string", "description": "Text or regex to find"},
                 "is_regex": {"type": "boolean", "description": "Treat the query as a regular expression"},
-                "include_glob": {"type": "string", "description": "Only search files matching this glob, e.g. **/*.rs"}
+                "case_insensitive": {"type": "boolean", "description": "Ignore letter case"},
+                "include_glob": {"type": "string", "description": "Only search files matching this glob, e.g. **/*.rs"},
+                "path": {"type": "string", "description": "Only search inside this directory or file"},
+                "context_lines": {"type": "integer", "description": "Lines of context before and after each match (0-5)"},
+                "max_results": {"type": "integer", "description": "Maximum matches to return (default 100, max 500)"}
             }),
             &["query"],
         ),
@@ -122,6 +127,36 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
                 "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (1000-600000; default 120000)"}
             }),
             &["command"],
+        ),
+        spec(
+            "web_fetch",
+            "Fetch a web page (documentation, API reference, changelog) and return its readable text. \
+             Needs user approval unless full access is on. Use it for information that is not in the workspace.",
+            json!({
+                "url": {"type": "string", "description": "http(s) URL"},
+                "raw": {"type": "boolean", "description": "Return the raw body instead of text extracted from HTML"}
+            }),
+            &["url"],
+        ),
+        spec(
+            "todo_write",
+            "Create or update your task list for multi-step work. Send the complete list every time. Use it for \
+             tasks with 3 or more steps: plan the steps first, keep exactly one item in_progress, and mark items \
+             completed as soon as they are done.",
+            json!({
+                "todos": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "What to do, imperative"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}
+                        },
+                        "required": ["content", "status"]
+                    }
+                }
+            }),
+            &["todos"],
         ),
         spec("git_status", "Show the working tree status (staged + modified + untracked files).", json!({}), &[]),
         spec(
@@ -162,6 +197,28 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
             &["path", "old_string", "new_string"],
         ));
         specs.push(spec(
+            "fs_multi_edit",
+            "Apply several edits to one file in a single step, in order. Each edit works like fs_edit (old_string \
+             from the current content, unique unless replace_all). All edits succeed or none is applied. Prefer \
+             this over several fs_edit calls on the same file.",
+            json!({
+                "path": {"type": "string"},
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {"type": "string"},
+                            "new_string": {"type": "string"},
+                            "replace_all": {"type": "boolean"}
+                        },
+                        "required": ["old_string", "new_string"]
+                    }
+                }
+            }),
+            &["path", "edits"],
+        ));
+        specs.push(spec(
             "fs_delete",
             "Delete a file or directory inside the workspace.",
             json!({"path": {"type": "string"}}),
@@ -179,7 +236,16 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
 /// and kept out of Plan via that profile's tool allowlist; the permission
 /// engine still gates every command.
 pub fn is_read_only_tool(name: &str) -> bool {
-    !matches!(name, "fs_write" | "fs_edit" | "fs_delete")
+    !matches!(name, "fs_write" | "fs_edit" | "fs_multi_edit" | "fs_delete")
+}
+
+/// Tools that only read and never wait on the user in the common case, so a
+/// batch of them can run concurrently.
+pub fn is_parallel_safe(name: &str) -> bool {
+    matches!(
+        name,
+        "fs_read" | "fs_list" | "fs_search" | "glob_files" | "git_status" | "git_diff" | "git_log" | "todo_write"
+    )
 }
 
 /// Execution-time gate for agent mode and profile allowlist. Returns the
@@ -278,7 +344,8 @@ pub fn classify(name: &str, args: &Value, ctx: &ToolContext) -> Result<Action> {
                 Ok(Action::ReadOutsideWorkspace { path: c.path })
             }
         }
-        "fs_list" | "glob_files" | "fs_search" | "git_status" | "git_diff" | "git_log" => {
+        // `todo_write` only echoes its arguments: classify it as a plain read.
+        "fs_list" | "glob_files" | "fs_search" | "git_status" | "git_diff" | "git_log" | "todo_write" => {
             // Read-only tools: reads stay inside the workspace (enforced at
             // execution by Workspace::resolve).
             Ok(Action::ReadFile {
@@ -286,7 +353,8 @@ pub fn classify(name: &str, args: &Value, ctx: &ToolContext) -> Result<Action> {
                 sensitive: false,
             })
         }
-        "fs_write" | "fs_edit" => {
+        "web_fetch" => Ok(Action::FetchUrl { url: get_str(args, "url")?.trim().to_string() }),
+        "fs_write" | "fs_edit" | "fs_multi_edit" => {
             let path = get_str(args, "path")?;
             let ClassifiedPath { path: p, inside, .. } = classify_path(&ctx.workspace, &path);
             if !inside {
@@ -346,10 +414,19 @@ pub fn preview(name: &str, args: &Value, ctx: &ToolContext) -> Option<String> {
                 }
             }
         }
+        "fs_multi_edit" => {
+            let path = get_str(args, "path").ok()?;
+            let before = ctx.workspace.read_file(&path).ok()?;
+            match apply_multi_edit(&before, args, &path) {
+                Ok(after) => Some(jcode_tool_filesystem::unified_diff(&before, &after, &path)),
+                Err(e) => Some(format!("(this edit will fail: {})", e.to_string().lines().next().unwrap_or_default())),
+            }
+        }
         "fs_delete" => {
             let path = get_str(args, "path").ok()?;
             Some(format!("Delete {path}"))
         }
+        "web_fetch" => get_str(args, "url").ok(),
         "terminal_run" => get_str(args, "command").ok(),
         _ => None,
     }
@@ -393,6 +470,9 @@ pub async fn execute(
     }
     if name == "terminal_run" {
         return run_terminal(args, &ctx.workspace, cancel).await;
+    }
+    if name == "web_fetch" {
+        return run_web_fetch(args, cancel).await;
     }
     // Filesystem and git tools do blocking I/O (and spawn `git`): keep them
     // off the async executor threads.
@@ -440,6 +520,45 @@ async fn run_terminal(args: &Value, ws: &Workspace, cancel: &CancelToken) -> Res
     })
 }
 
+async fn run_web_fetch(args: &Value, cancel: &CancelToken) -> Result<ToolOutcome> {
+    let url = get_str(args, "url")?.trim().to_string();
+    let raw = args.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
+    let fetched = tokio::select! {
+        r = crate::web::fetch(&url, raw) => r?,
+        _ = cancel.cancelled() => bail!("cancelled"),
+    };
+    let header = if fetched.final_url == url {
+        format!("--- {url} ({}) ---", fetched.content_type)
+    } else {
+        format!("--- {url} -> {} ({}) ---", fetched.final_url, fetched.content_type)
+    };
+    Ok(ToolOutcome {
+        summary: format!("Fetched {} ({:.1} KB)", truncate(&url, 60), fetched.bytes as f64 / 1024.0),
+        result_for_model: truncate_for_model(&format!("{header}\n{}", fetched.text)),
+        diff: None,
+    })
+}
+
+/// Apply `fs_multi_edit` edits to `before` in order; any failure aborts.
+fn apply_multi_edit(before: &str, args: &Value, path: &str) -> Result<String> {
+    let edits = args
+        .get("edits")
+        .and_then(|v| v.as_array())
+        .filter(|e| !e.is_empty())
+        .ok_or_else(|| anyhow!("`edits` must be a non-empty list"))?;
+    let mut content = before.to_string();
+    for (i, e) in edits.iter().enumerate() {
+        let old = get_str(e, "old_string").map_err(|err| anyhow!("edit {}: {err}", i + 1))?;
+        let new = get_str(e, "new_string").map_err(|err| anyhow!("edit {}: {err}", i + 1))?;
+        let replace_all = e.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+        let (old, new) = strip_copied_line_numbers(&content, old, new);
+        content = jcode_tool_filesystem::plan_edit(&content, &old, &new, replace_all, path)
+            .map_err(|err| anyhow!("edit {} of {} failed (no edits were applied): {err:#}", i + 1, edits.len()))?
+            .after;
+    }
+    Ok(content)
+}
+
 fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolOutcome> {
     let ws = &ctx.workspace;
     match name {
@@ -482,20 +601,24 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
         }
         "fs_search" => {
             let query = get_str(args, "query")?;
+            let max = args.get("max_results").and_then(|v| v.as_u64()).map(|n| n as usize);
             let hits = ws.search(&SearchQuery {
                 query: query.clone(),
                 is_regex: args.get("is_regex").and_then(|v| v.as_bool()).unwrap_or(false),
                 include_glob: get_str_opt(args, "include_glob"),
+                case_insensitive: args.get("case_insensitive").and_then(|v| v.as_bool()).unwrap_or(false),
+                context_lines: args.get("context_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                path: get_str_opt(args, "path"),
+                max_results: max,
             })?;
             let summary = format!("Searched {:?} — {} hit(s)", query, hits.len());
-            let body = if hits.is_empty() {
-                "No matches.".to_string()
-            } else {
-                hits.iter()
-                    .map(|h| format!("{}:{}: {}", h.path, h.line_number.unwrap_or(0), h.line.trim()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
+            let cap = max.unwrap_or(jcode_tool_filesystem::MAX_SEARCH_RESULTS).clamp(1, 500);
+            let mut body = if hits.is_empty() { "No matches.".to_string() } else { format_hits(&hits) };
+            if hits.len() >= cap {
+                body.push_str(&format!(
+                    "\n(Stopped at {cap} matches. Narrow the query, or use path / include_glob.)"
+                ));
+            }
             Ok(ToolOutcome {
                 summary,
                 result_for_model: truncate_for_model(&body),
@@ -547,6 +670,26 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
                 result_for_model,
                 diff: Some(out.diff),
             })
+        }
+        "fs_multi_edit" => {
+            let path = get_str(args, "path")?;
+            let before = ws.read_file(&path)?;
+            let after = apply_multi_edit(&before, args, &path)?;
+            let count = args.get("edits").and_then(|v| v.as_array()).map_or(0, Vec::len);
+            ctx.checkpoint(&path)?;
+            let out = ws.write_file(&path, &after)?;
+            Ok(ToolOutcome {
+                summary: format!("Edited {} ({count} edit(s))", out.path),
+                result_for_model: truncate_for_model(&format!(
+                    "Successfully applied {count} edit(s) to {}. Resulting diff:\n{}",
+                    out.path, out.diff
+                )),
+                diff: Some(out.diff),
+            })
+        }
+        "todo_write" => {
+            let (summary, result_for_model) = crate::todo::apply(args)?;
+            Ok(ToolOutcome { summary, result_for_model, diff: None })
         }
         "fs_delete" => {
             let path = get_str(args, "path")?;
@@ -676,6 +819,27 @@ fn strip_copied_line_numbers(before: &str, old: String, new: String) -> (String,
         }
         _ => (old, new),
     }
+}
+
+/// ripgrep-style output: `path:line: match`, context as `path-line- text`,
+/// `--` between non-adjacent groups.
+fn format_hits(hits: &[jcode_common::SearchHit]) -> String {
+    let with_context = hits.iter().any(|h| !h.before.is_empty() || !h.after.is_empty());
+    let mut out = Vec::new();
+    for (i, h) in hits.iter().enumerate() {
+        let n = h.line_number.unwrap_or(0);
+        if with_context && i > 0 {
+            out.push("--".to_string());
+        }
+        for (k, l) in h.before.iter().enumerate() {
+            out.push(format!("{}-{}- {}", h.path, n as usize - h.before.len() + k, l));
+        }
+        out.push(format!("{}:{}: {}", h.path, n, h.line.trim_end()));
+        for (k, l) in h.after.iter().enumerate() {
+            out.push(format!("{}-{}- {}", h.path, n as usize + 1 + k, l));
+        }
+    }
+    out.join("\n")
 }
 
 fn require_repo(ws: &Workspace) -> Result<GitRepo> {
@@ -934,6 +1098,72 @@ mod tests {
         // Text that is really in the file is never rewritten.
         let (old, _) = strip_copied_line_numbers("1\tid", "1\tid".into(), String::new());
         assert_eq!(old, "1\tid");
+    }
+
+    #[tokio::test]
+    async fn multi_edit_is_all_or_nothing() {
+        let (_t, c) = ctx();
+        c.workspace.write_file("m.rs", "let a = 1;\nlet b = 2;\n").unwrap();
+        let run = |args: Value| {
+            let c = c.clone();
+            async move { execute("fs_multi_edit", &args, &c, &CancelToken::new()).await }
+        };
+        let out = run(json!({"path": "m.rs", "edits": [
+            {"old_string": "let a = 1;", "new_string": "let a = 10;"},
+            {"old_string": "let b = 2;", "new_string": "let b = 20;"}
+        ]}))
+        .await
+        .unwrap();
+        assert!(out.summary.contains("2 edit(s)"));
+        assert_eq!(c.workspace.read_file("m.rs").unwrap(), "let a = 10;\nlet b = 20;\n");
+
+        let err = run(json!({"path": "m.rs", "edits": [
+            {"old_string": "let a = 10;", "new_string": "let a = 0;"},
+            {"old_string": "missing", "new_string": "x"}
+        ]}))
+        .await
+        .err()
+        .unwrap();
+        assert!(format!("{err:#}").contains("edit 2 of 2 failed"));
+        assert_eq!(c.workspace.read_file("m.rs").unwrap(), "let a = 10;\nlet b = 20;\n", "nothing applied");
+        assert!(matches!(
+            classify("fs_multi_edit", &json!({"path": "m.rs", "edits": []}), &c).unwrap(),
+            Action::EditFile { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn search_context_todo_and_fetch_classification() {
+        let (_t, c) = ctx();
+        c.workspace.write_file("s.txt", "alpha\nBeta\ngamma\n").unwrap();
+        let out = execute(
+            "fs_search",
+            &json!({"query": "beta", "case_insensitive": true, "context_lines": 1}),
+            &c,
+            &CancelToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.result_for_model, "s.txt-1- alpha\ns.txt:2: Beta\ns.txt-3- gamma");
+
+        let out = execute(
+            "todo_write",
+            &json!({"todos": [{"content": "a", "status": "in_progress"}]}),
+            &c,
+            &CancelToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(out.result_for_model.contains("[>] a"));
+
+        let a = classify("web_fetch", &json!({"url": " https://example.com "}), &c).unwrap();
+        assert!(matches!(a, Action::FetchUrl { ref url } if url == "https://example.com"));
+        let names: Vec<String> = tool_specs(true, None).into_iter().map(|t| t.name).collect();
+        for t in ["web_fetch", "todo_write"] {
+            assert!(names.iter().any(|n| n == t), "{t} offered in read-only modes");
+        }
+        assert!(!names.iter().any(|n| n == "fs_multi_edit"));
+        assert!(tool_rejection(&profile(AgentMode::Plan, None), "fs_multi_edit").is_some());
     }
 
     #[test]

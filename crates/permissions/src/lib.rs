@@ -23,6 +23,8 @@ pub enum Grant {
     RunCommands,
     /// Allow file deletion inside the workspace without asking again.
     DeleteFiles,
+    /// Allow fetching web pages without asking again.
+    FetchUrls,
 }
 
 impl Grant {
@@ -31,6 +33,7 @@ impl Grant {
             "write_files" => Some(Grant::WriteFiles),
             "run_commands" => Some(Grant::RunCommands),
             "delete_files" => Some(Grant::DeleteFiles),
+            "fetch_urls" => Some(Grant::FetchUrls),
             _ => None,
         }
     }
@@ -56,6 +59,8 @@ pub enum Action {
     DeleteFile { path: PathBuf },
     /// Run a shell command.
     RunCommand { command: String, cwd: PathBuf },
+    /// Fetch a web page (its content is sent to the model).
+    FetchUrl { url: String },
 }
 
 impl Action {
@@ -75,6 +80,7 @@ impl Action {
             Action::EditFile { .. } => "edit_file",
             Action::DeleteFile { .. } => "delete_file",
             Action::RunCommand { .. } => "run_command",
+            Action::FetchUrl { .. } => "fetch_url",
         }
     }
 }
@@ -1166,6 +1172,24 @@ impl PolicyEngine {
                     })
                 }
             }
+            Action::FetchUrl { url } => {
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Denied(format!("Only http(s) URLs can be fetched: {url}"));
+                }
+                if self.grants.contains(&Grant::FetchUrls) || self.mode == PolicyMode::Yolo {
+                    Allowed
+                } else {
+                    NeedsApproval(ApprovalRequest {
+                        kind: action.kind().into(),
+                        description: format!("Fetch {url}"),
+                        preview: Some(
+                            "The page is downloaded by the app and its text is sent to the AI provider. \
+                             A URL can carry data out (e.g. in its query string), so check it."
+                                .into(),
+                        ),
+                    })
+                }
+            }
             Action::RunCommand { command, .. } => {
                 let assessment = assess_command(command);
                 if let Some(reason) = &assessment.catastrophic {
@@ -1234,6 +1258,21 @@ mod tests {
 
     fn engine(mode: PolicyMode) -> PolicyEngine {
         PolicyEngine::new(mode, "/tmp/ws")
+    }
+
+    #[test]
+    fn fetch_url_asks_unless_granted_or_full_access() {
+        let fetch = Action::FetchUrl { url: "https://docs.example.com/a?b=1".into() };
+        for mode in [PolicyMode::Safe, PolicyMode::Balanced] {
+            assert!(matches!(engine(mode).check(&fetch), CheckOutcome::NeedsApproval(_)), "{mode:?}");
+        }
+        assert!(matches!(engine(PolicyMode::Yolo).check(&fetch), CheckOutcome::Allowed));
+        let mut e = engine(PolicyMode::Safe);
+        e.grant(Grant::FetchUrls);
+        assert!(matches!(e.check(&fetch), CheckOutcome::Allowed));
+        let file = Action::FetchUrl { url: "file:///etc/passwd".into() };
+        assert!(matches!(engine(PolicyMode::Yolo).check(&file), CheckOutcome::Denied(_)));
+        assert_eq!(Grant::parse("fetch_urls"), Some(Grant::FetchUrls));
     }
 
     #[test]

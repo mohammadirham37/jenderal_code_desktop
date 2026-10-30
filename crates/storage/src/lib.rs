@@ -19,6 +19,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("006_message_reasoning", include_str!("../migrations/006_message_reasoning.sql")),
     ("007_antigravity_agent", include_str!("../migrations/007_antigravity_agent.sql")),
     ("008_agent_bypass_args", include_str!("../migrations/008_agent_bypass_args.sql")),
+    ("009_profile_new_tools", include_str!("../migrations/009_profile_new_tools.sql")),
 ];
 
 pub struct Db {
@@ -1264,6 +1265,30 @@ mod tests {
         assert_eq!(bypass("opencode").as_deref(), Some("--auto"));
         assert_eq!(bypass("antigravity").as_deref(), Some("--dangerously-skip-permissions"));
         assert_eq!(bypass("gemini"), None);
+    }
+
+    #[test]
+    fn new_tools_are_added_to_builtin_readonly_profiles_once() {
+        let d = db();
+        d.with_conn(|c| {
+            c.execute_batch(
+                "INSERT INTO agent_profiles(id,name,mode,system_prompt,allowed_tools_json,built_in,created_at)
+                 VALUES ('plan','Plan','plan','',' [\"fs_read\"]',1,0),
+                        ('custom','C','plan','','[\"fs_read\"]',0,0);",
+            )?;
+            let sql = include_str!("../migrations/009_profile_new_tools.sql");
+            c.execute_batch(sql)?;
+            c.execute_batch(sql)?;
+            Ok(())
+        })
+        .unwrap();
+        let tools = |id: &str| -> String {
+            d.with_conn(|c| Ok(c.query_row("SELECT allowed_tools_json FROM agent_profiles WHERE id=?1", [id], |r| r.get(0))?))
+                .unwrap()
+        };
+        let plan: Vec<String> = serde_json::from_str(&tools("plan")).unwrap();
+        assert_eq!(plan, ["fs_read", "todo_write", "web_fetch"]);
+        assert_eq!(tools("custom"), "[\"fs_read\"]", "user profiles untouched");
     }
 
     #[test]

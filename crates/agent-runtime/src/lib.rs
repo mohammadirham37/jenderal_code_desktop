@@ -3,6 +3,8 @@
 
 pub mod context;
 pub mod executor;
+pub mod todo;
+pub mod web;
 
 use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
@@ -108,7 +110,7 @@ Do not attempt to modify anything — write access is disabled."
                 .into(),
             allowed_tools: Some(vec![
                 "fs_read".into(), "fs_list".into(), "fs_search".into(), "glob_files".into(),
-                "git_status".into(), "git_diff".into(), "git_log".into(),
+                "git_status".into(), "git_diff".into(), "git_log".into(), "todo_write".into(), "web_fetch".into(),
             ]),
             policy_mode: PolicyMode::Safe,
             provider_id: None,
@@ -144,6 +146,7 @@ Write access is disabled — investigate only. Report findings as a prioritized 
             allowed_tools: Some(vec![
                 "fs_read".into(), "fs_list".into(), "fs_search".into(), "glob_files".into(),
                 "terminal_run".into(), "git_status".into(), "git_diff".into(), "git_log".into(),
+                "todo_write".into(), "web_fetch".into(),
             ]),
             policy_mode: PolicyMode::Safe,
             provider_id: None,
@@ -753,22 +756,43 @@ impl AgentRuntime {
             // valid for providers that require call/result pairing.
             // --------------------------------------------------------------
             sink.status(session_id, ChatStatus::RunningTool, None).await;
-            for call in &tool_calls {
-                let outcome_content = if cancel.is_cancelled() {
-                    "Cancelled by the user before this tool ran.".to_string()
-                } else {
+            let output_truncated = stop_reason == Some(StopReason::MaxTokens);
+            let run_one = |call: &ToolCall| {
+                let (tool_ctx, policy, cancel, sink, db, assistant_id) =
+                    (&tool_ctx, &policy, &cancel, &sink, &db, &assistant_id);
+                let call = call.clone();
+                async move {
+                    if cancel.is_cancelled() {
+                        return "Cancelled by the user before this tool ran.".to_string();
+                    }
                     match self
                         .process_call(
-                            session_id, call, profile, read_only, &tool_ctx, &policy, &cancel,
-                            &sink, &db, &assistant_id, stop_reason == Some(StopReason::MaxTokens),
+                            session_id, &call, profile, read_only, tool_ctx, policy, cancel, sink, db,
+                            assistant_id, output_truncated,
                         )
                         .await
                     {
                         Ok(c) => c,
                         Err(e) => format!("Error: {e:#}"),
                     }
-                };
+                }
+            };
+            // Consecutive read-only calls (reads, searches, git queries) run
+            // concurrently; everything else runs one at a time, in order.
+            let mut outcomes: Vec<String> = Vec::with_capacity(tool_calls.len());
+            let mut start = 0;
+            while start < tool_calls.len() {
+                let mut end = start + 1;
+                if executor::is_parallel_safe(&tool_calls[start].name) {
+                    while end < tool_calls.len() && executor::is_parallel_safe(&tool_calls[end].name) {
+                        end += 1;
+                    }
+                }
+                outcomes.extend(futures::future::join_all(tool_calls[start..end].iter().map(run_one)).await);
+                start = end;
+            }
 
+            for (call, outcome_content) in tool_calls.iter().zip(outcomes) {
                 let tool_msg = MessageRecord {
                     id: new_id(),
                     session_id: session_id.into(),

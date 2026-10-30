@@ -657,6 +657,11 @@ pub struct SearchHit {
     #[serde(default)]
     pub line_number: Option<u64>,
     pub line: String,
+    /// Lines before/after the match when context was requested.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub before: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<String>,
 }
 
 pub fn now_ms() -> i64 {
