@@ -1,5 +1,6 @@
-/** Chat-first layout: sessions sidebar | wide chat | collapsible context panel
- *  (changed files, explorer, editor, terminal, git). */
+/** Chat-first layout: sessions sidebar | centre column (Chat plus terminal
+ *  and agent-CLI tabs) | collapsible context panel (changed files, explorer,
+ *  editor, terminal, git). */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -17,10 +18,10 @@ import {
   Terminal as TerminalIcon,
   Trash2,
 } from "lucide-react";
-import { ChatPanel } from "@/features/chat/ChatPanel";
 import { BrowserPanel } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
 import { ChangesPanel } from "./ChangesPanel";
+import { CenterColumn } from "./CenterColumn";
 import { LazyEditorPane, LazyGitPanel, LazyTerminalPanel, PanelSuspense } from "./lazy";
 import { useApp } from "@/stores/app";
 import { useChat } from "@/stores/chat";
@@ -80,15 +81,16 @@ export function ChatLayout() {
       <div {...sidebar.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
 
       <div className="relative min-w-0 flex-1">
-        <ChatPanel variant="full" />
-        <div className="absolute right-2 top-1.5 z-10">
-          <IconButton
-            title={contextOpen ? "Hide context panel" : "Show context panel"}
-            onClick={() => setContextOpen(!contextOpen)}
-          >
-            {contextOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-          </IconButton>
-        </div>
+        <CenterColumn
+          trailing={
+            <IconButton
+              title={contextOpen ? "Hide context panel" : "Show context panel"}
+              onClick={() => setContextOpen(!contextOpen)}
+            >
+              {contextOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+            </IconButton>
+          }
+        />
       </div>
 
       {contextOpen && (
