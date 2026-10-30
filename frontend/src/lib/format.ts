@@ -37,6 +37,17 @@ export function formatRelative(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+/** Time until `ts`: "in 3h 12m", "in 2d 4h", "in 5m", or "now". */
+export function formatUntil(ts: number): string {
+  const diff = ts - Date.now();
+  if (diff <= 60_000) return "now";
+  const m = Math.floor(diff / 60_000);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `in ${h}h ${m % 60}m`;
+  return `in ${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
 export function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }

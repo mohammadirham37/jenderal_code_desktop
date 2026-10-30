@@ -8,6 +8,7 @@ import { useApp } from "@/stores/app";
 import { CHAT_TAB, useCenterTabs, type CenterTab } from "@/stores/centerTabs";
 import { Button, IconButton } from "@/components/ui";
 import { LazyXtermView, PanelSuspense } from "./lazy";
+import { AgentUsageButton } from "./AgentUsage";
 
 export function CenterColumn({ trailing }: { trailing?: ReactNode }) {
   const { tabs, activeId } = useCenterTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId })));
@@ -37,6 +38,7 @@ export function CenterColumn({ trailing }: { trailing?: ReactNode }) {
           ))}
         </div>
         <NewTabMenu />
+        <AgentUsageButton />
         <div className="ml-auto flex items-center">{trailing}</div>
       </div>
       <div className="relative min-h-0 flex-1">

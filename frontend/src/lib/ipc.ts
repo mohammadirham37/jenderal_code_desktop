@@ -137,6 +137,31 @@ export interface ApprovalRecord {
   decided_at?: number | null;
 }
 
+export type AgentUsageStatus = "ok" | "not_installed" | "not_signed_in" | "expired" | "unavailable" | "error";
+
+/** One usage window (Rust `UsageWindow`). */
+export interface UsageWindow {
+  label: string;
+  /** 0-100; null for activity without a limit. */
+  used_percent: number | null;
+  /** Unix ms. */
+  resets_at: number | null;
+  detail: string | null;
+}
+
+/** Subscription usage of one external agent CLI (Rust `AgentUsageReport`). */
+export interface AgentUsageReport {
+  id: string;
+  name: string;
+  status: AgentUsageStatus;
+  plan: string | null;
+  account: string | null;
+  windows: UsageWindow[];
+  note: string | null;
+  /** Unix ms when the data was recorded, if not live. */
+  updated_at: number | null;
+}
+
 /** Terminal agent CLI in the chat column's "+" menu (Rust `AgentCli`). */
 export interface AgentCli {
   id: string;
@@ -478,6 +503,7 @@ export const api = {
   terminalKill: (id: string) => invoke<void>("terminal_kill", { id }),
   terminalList: () => invoke<string[]>("terminal_list"),
   detectAgentClis: (commands: string[]) => invoke<boolean[]>("detect_agent_clis", { commands }),
+  agentUsage: () => invoke<AgentUsageReport[]>("agent_usage"),
 
   // External agents (experimental)
   cliAgentPresets: () =>
