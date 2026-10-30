@@ -69,6 +69,7 @@ export const useApp = create<AppState>((set, get) => ({
     show_hidden_files: true,
     credential_storage: "file",
     editor_word_wrap: true,
+    agent_clis: [],
   },
   paletteOpen: false,
   ready: false,

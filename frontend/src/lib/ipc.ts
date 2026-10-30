@@ -135,6 +135,14 @@ export interface ApprovalRecord {
   decided_at?: number | null;
 }
 
+/** Terminal agent CLI in the chat column's "+" menu (Rust `AgentCli`). */
+export interface AgentCli {
+  id: string;
+  name: string;
+  command: string;
+  enabled: boolean;
+}
+
 export interface AppSettings {
   theme: string;
   default_policy_mode: PolicyMode;
@@ -147,6 +155,8 @@ export interface AppSettings {
   credential_storage: string;
   /** Wrap long editor lines instead of horizontal scrolling. */
   editor_word_wrap: boolean;
+  /** Agent CLIs for the chat column's "+" menu. */
+  agent_clis: AgentCli[];
 }
 
 export interface ProviderTestResult {
@@ -456,13 +466,14 @@ export const api = {
   browserClose: (id: string) => invoke<void>("browser_close", { id }),
 
   // Terminals
-  terminalCreate: (id: string, cols?: number, rows?: number) =>
-    invoke<void>("terminal_create", { id, cols: cols ?? null, rows: rows ?? null }),
+  terminalCreate: (id: string, cols?: number, rows?: number, command?: string) =>
+    invoke<void>("terminal_create", { id, cols: cols ?? null, rows: rows ?? null, command: command ?? null }),
   terminalWrite: (id: string, data: string) => invoke<void>("terminal_write", { id, data }),
   terminalResize: (id: string, cols: number, rows: number) =>
     invoke<void>("terminal_resize", { id, cols, rows }),
   terminalKill: (id: string) => invoke<void>("terminal_kill", { id }),
   terminalList: () => invoke<string[]>("terminal_list"),
+  detectAgentClis: (commands: string[]) => invoke<boolean[]>("detect_agent_clis", { commands }),
 
   // External agents (experimental)
   cliAgentPresets: () =>
