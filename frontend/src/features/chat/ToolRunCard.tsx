@@ -1,5 +1,5 @@
 /** Tool-run card: shows agent tool activity with status and results. */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -156,6 +156,70 @@ export function ToolRunCard({
 interface Todo {
   content: string;
   status: "pending" | "in_progress" | "completed";
+}
+
+/** The newest successful `todo_write` list of the session. */
+export function latestTodos(runs: ToolRunRecord[]): { runId: string; todos: Todo[] } | null {
+  let best: ToolRunRecord | null = null;
+  for (const r of runs) {
+    if (r.tool_name === "todo_write" && r.status === "success" && (!best || r.created_at >= best.created_at)) best = r;
+  }
+  const todos = best ? parseTodos(best.args?.todos) : null;
+  return best && todos ? { runId: best.id, todos } : null;
+}
+
+/** The agent's current checklist, pinned above the composer. Collapsed it
+ *  shows the step in progress; a finished list can be dismissed until the
+ *  agent writes a new one. */
+export function TodoDock({ runs }: { runs: ToolRunRecord[] }) {
+  const latest = useMemo(() => latestTodos(runs), [runs]);
+  const [collapsed, setCollapsed] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  if (!latest || latest.runId === dismissed) return null;
+  const { todos } = latest;
+  const done = todos.filter((t) => t.status === "completed").length;
+  const allDone = done === todos.length;
+  const current = todos.find((t) => t.status === "in_progress") ?? todos.find((t) => t.status === "pending");
+  return (
+    <div className="animate-rise mb-1.5 overflow-hidden rounded-[5px] border border-neutral-200 bg-white shadow-[0_10px_28px_-22px_rgba(0,0,0,0.6)] dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="flex items-center gap-2 px-2.5 py-1">
+        <button
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          title={collapsed ? "Show the agent's todo list" : "Collapse"}
+          onClick={() => setCollapsed(!collapsed)}
+        >
+          {collapsed ? <ChevronRight size={11} className="shrink-0" /> : <ChevronDown size={11} className="shrink-0" />}
+          <ListChecks size={12} className="shrink-0 text-accent-600 dark:text-accent-400" />
+          <span className="eyebrow shrink-0">Todos</span>
+          <span className="shrink-0 font-mono text-[10px] text-neutral-500">
+            {done}/{todos.length}
+          </span>
+          <span className="h-1 w-16 shrink-0 overflow-hidden rounded-[1px] bg-neutral-200 dark:bg-neutral-800">
+            <span className="block h-full bg-accent-500 transition-[width]" style={{ width: `${(done / todos.length) * 100}%` }} />
+          </span>
+          {collapsed && (
+            <span className="min-w-0 truncate text-[11.5px] text-neutral-600 dark:text-neutral-400">
+              {allDone ? "All done" : current?.content}
+            </span>
+          )}
+        </button>
+        {allDone && (
+          <button
+            title="Dismiss"
+            onClick={() => setDismissed(latest.runId)}
+            className="shrink-0 rounded-[3px] p-0.5 text-neutral-500 hover:bg-neutral-200 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <X size={11} />
+          </button>
+        )}
+      </div>
+      {!collapsed && (
+        <div className="max-h-44 overflow-y-auto">
+          <TodoList todos={todos} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function parseTodos(value: unknown): Todo[] | null {

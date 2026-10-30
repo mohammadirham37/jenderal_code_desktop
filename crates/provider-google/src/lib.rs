@@ -56,10 +56,20 @@ impl GoogleProvider {
         for m in &request.messages {
             match m.role {
                 Role::System => continue, // handled via systemInstruction
-                Role::User => out.push(json!({
-                    "role": "user",
-                    "parts": [{"text": m.content}]
-                })),
+                Role::User => {
+                    // A user message right after function responses
+                    // (steering) joins their turn.
+                    if let Some(last) = out.last_mut() {
+                        if last["role"] == "user" && last["parts"].is_array() {
+                            last["parts"].as_array_mut().unwrap().push(json!({"text": m.content}));
+                            continue;
+                        }
+                    }
+                    out.push(json!({
+                        "role": "user",
+                        "parts": [{"text": m.content}]
+                    }));
+                }
                 Role::Assistant => {
                     if m.tool_calls.is_empty() {
                         out.push(json!({
@@ -401,6 +411,7 @@ mod tests {
                     tool_name: Some("fs_read".into()),
                     reasoning: None,
                 },
+                ChatMessage::new(Role::User, "also check b"),
             ],
             tools: vec![ToolSpec {
                 name: "fs_read".into(),
@@ -423,6 +434,8 @@ mod tests {
             contents[2]["parts"][0]["functionResponse"]["response"]["result"],
             "file content here"
         );
+        // A follow-up user message joins the function-response turn.
+        assert_eq!(contents[2]["parts"][1]["text"], "also check b");
     }
 
     async fn collect(chunks: Vec<Vec<u8>>) -> Vec<StreamEvent> {

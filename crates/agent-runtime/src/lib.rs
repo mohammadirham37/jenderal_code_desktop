@@ -202,6 +202,15 @@ struct SessionHandle {
     busy: bool,
     /// Files the agent has read, kept across turns.
     files: executor::SharedFileTracker,
+    /// Steering messages sent while the turn runs, injected at the next
+    /// step boundary. Cleared together with `busy`, so a message is either
+    /// injected or dropped (the frontend re-sends dropped ones).
+    steer: Vec<SteerMessage>,
+}
+
+struct SteerMessage {
+    id: String,
+    content: String,
 }
 
 /// A pending approval waiting for the user's decision.
@@ -229,6 +238,7 @@ impl Drop for BusyGuard {
             .unwrap_or_else(|e| e.into_inner());
         if let Some(h) = sessions.get_mut(&self.session_id) {
             h.busy = false;
+            h.steer.clear();
         }
     }
 }
@@ -280,6 +290,7 @@ impl AgentRuntime {
             policy: Arc::new(Mutex::new(PolicyEngine::new(mode, &canonical))),
             busy: false,
             files: Default::default(),
+            steer: Vec::new(),
         });
         let mut p = entry.policy.lock().unwrap();
         let grants: Vec<Grant> = p.grants().iter().copied().collect();
@@ -383,6 +394,64 @@ impl AgentRuntime {
         }
     }
 
+    /// Steer the running turn: the message is added to the conversation at
+    /// the next step boundary (after the current tool results, or right
+    /// after the answer if the model was about to stop). Returns the id the
+    /// persisted message will get, or `None` when no turn is running (the
+    /// caller should send it as a normal message instead).
+    pub fn steer(&self, session_id: &str, content: &str) -> Option<String> {
+        let content = content.trim();
+        if content.is_empty() {
+            return None;
+        }
+        let mut sessions = self.sessions.lock().unwrap();
+        let h = sessions.get_mut(session_id).filter(|h| h.busy && !h.cancel.is_cancelled())?;
+        let id = new_id();
+        h.steer.push(SteerMessage {
+            id: id.clone(),
+            content: content.to_string(),
+        });
+        Some(id)
+    }
+
+    fn take_steer(&self, session_id: &str) -> Vec<SteerMessage> {
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions
+            .get_mut(session_id)
+            .map(|h| std::mem::take(&mut h.steer))
+            .unwrap_or_default()
+    }
+
+    /// Persist pending steering messages as user messages. Returns whether
+    /// any were added (the model then needs another step).
+    async fn inject_steer(
+        &self,
+        session_id: &str,
+        sink: &Arc<dyn EventSink>,
+        db: &Arc<Db>,
+        history: &mut Vec<ChatMessage>,
+    ) -> Result<bool> {
+        let pending = self.take_steer(session_id);
+        let injected = !pending.is_empty();
+        for m in pending {
+            let msg = MessageRecord {
+                id: m.id,
+                session_id: session_id.into(),
+                role: Role::User,
+                content: m.content,
+                tool_calls: vec![],
+                tool_call_id: None,
+                tool_name: None,
+                reasoning: None,
+                created_at: now_ms(),
+            };
+            db.append_message(&msg)?;
+            sink.message(session_id, &msg).await;
+            history.push(to_chat_message(msg));
+        }
+        Ok(injected)
+    }
+
     /// Send a user message and run the agent turn in the background.
     /// Returns immediately; progress arrives via the EventSink.
     pub async fn send_message(
@@ -447,6 +516,7 @@ impl AgentRuntime {
                     ))),
                     busy: false,
                     files: Default::default(),
+                    steer: Vec::new(),
                 });
             // Keep an existing engine as-is: policy changes made at runtime
             // (ensure_session_policy / set_policy_mode / session grants)
@@ -456,6 +526,7 @@ impl AgentRuntime {
             }
             entry.cancel = CancelToken::new();
             entry.busy = true;
+            entry.steer.clear();
         }
 
         let runtime = self.clone();
@@ -819,6 +890,11 @@ impl AgentRuntime {
             }
 
             if tool_calls.is_empty() {
+                // A steering message that arrived during the answer gets a
+                // reply in the same turn.
+                if self.inject_steer(session_id, &sink, &db, &mut history).await? {
+                    continue;
+                }
                 break; // final answer
             }
 
@@ -917,6 +993,7 @@ impl AgentRuntime {
                     .await;
                 return Ok(());
             }
+            self.inject_steer(session_id, &sink, &db, &mut history).await?;
             // Loop: feed tool results back to the model.
         }
 
@@ -1432,6 +1509,35 @@ mod tests {
         let history = context::trim_to_last_compaction(msgs.into_iter().map(to_chat_message).collect());
         assert!(history[0].content.starts_with(context::COMPACTION_MARKER));
         assert!(history.iter().all(|m| !m.content.contains("lorem ipsum")), "earlier turns replaced");
+    }
+
+    #[tokio::test]
+    async fn steering_message_joins_the_running_turn() {
+        let (rt, sink, dir, session_id) = setup().await;
+        rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Safe);
+        assert!(rt.steer(&session_id, "too early").is_none(), "no turn running");
+
+        rt.send_message(&session_id, "please demo create a file", &[]).await.unwrap();
+        // The turn is held at the approval, mid-step.
+        let approval = loop {
+            if let Some(a) = sink.saw_approval.lock().unwrap().first() {
+                break a.clone();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        };
+        let id = rt.steer(&session_id, "also say hello").expect("accepted while busy");
+        rt.decide_approval(&approval.id, true, None).await.unwrap();
+        wait_idle(&sink).await;
+
+        let msgs = rt.db.list_messages(&session_id).unwrap();
+        let i = msgs.iter().position(|m| m.id == id).expect("steer persisted with its id");
+        assert_eq!(msgs[i].role, Role::User);
+        assert_eq!(msgs[i].content, "also say hello");
+        assert_eq!(msgs[i - 1].role, Role::Tool, "injected after the tool result");
+        let last = msgs.last().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert!(last.content.starts_with("Hello!"), "answered in the same turn: {}", last.content);
+        assert!(rt.steer(&session_id, "late").is_none(), "turn over");
     }
 
     #[tokio::test]

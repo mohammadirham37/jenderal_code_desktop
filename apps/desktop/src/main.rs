@@ -187,6 +187,7 @@ fn main() {
             commands::get_session_approvals,
             commands::get_session_detail,
             commands::send_message,
+            commands::steer_message,
             commands::cancel_generation,
             commands::decide_approval,
             commands::set_session_model,

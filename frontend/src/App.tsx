@@ -143,15 +143,27 @@ function AppShell() {
             );
           })}
         </div>
-        <button
-          title="Toggle theme"
-          onClick={() =>
-            useApp.getState().updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" })
-          }
-          className="flex h-8 w-8 items-center justify-center rounded-[5px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
-        >
-          {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
+        <div className="flex flex-col items-center gap-1.5">
+          {/* Zoom indicator — visible whenever the zoom is not 100%. Click to reset. */}
+          {zoom !== 1 && (
+            <button
+              onClick={() => void useApp.getState().resetZoom()}
+              title={`Zoom ${Math.round(zoom * 100)}% — click or press ${isMac ? "⌘0" : "Ctrl+0"} to reset`}
+              className="rounded-[4px] border border-neutral-300 bg-white px-1.5 py-0.5 font-mono text-[10px] text-neutral-600 transition-colors hover:border-accent-500 hover:text-accent-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+          )}
+          <button
+            title="Toggle theme"
+            onClick={() =>
+              useApp.getState().updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" })
+            }
+            className="flex h-8 w-8 items-center justify-center rounded-[5px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+          >
+            {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+        </div>
       </aside>
 
       {/* Main view */}
@@ -174,16 +186,6 @@ function AppShell() {
 
       <CommandPalette />
 
-      {/* Zoom indicator — visible whenever the zoom is not 100%. Click to reset. */}
-      {zoom !== 1 && (
-        <button
-          onClick={() => void useApp.getState().resetZoom()}
-          title={`Zoom ${Math.round(zoom * 100)}% — click or press ${isMac ? "⌘0" : "Ctrl+0"} to reset`}
-          className="fixed bottom-3 right-3 z-40 rounded-[4px] border border-neutral-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] text-neutral-600 backdrop-blur transition-colors hover:border-accent-500 hover:text-accent-600 dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-300"
-        >
-          {Math.round(zoom * 100)}%
-        </button>
-      )}
     </div>
   );
 }

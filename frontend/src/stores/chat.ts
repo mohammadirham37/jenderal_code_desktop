@@ -18,6 +18,20 @@ export interface StreamingMessage {
   reasoning: string;
 }
 
+/** A message written while the agent was busy, sent when its turn ends. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: string[];
+}
+
+/** A steering message the runtime accepted; it joins the running turn at
+ *  the next step boundary (and disappears once its user message arrives). */
+export interface SteeringMessage {
+  id: string;
+  text: string;
+}
+
 interface ChatState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
@@ -33,6 +47,13 @@ interface ChatState {
   /** Token usage of the active session (null until loaded). */
   usage: SessionUsage | null;
   initialized: boolean;
+  /** Per session: messages waiting for the running turn to end. */
+  queued: Record<string, QueuedMessage[]>;
+  /** Per session: steering messages not yet added to the conversation. */
+  steering: Record<string, SteeringMessage[]>;
+  /** Per session: the queue is held (after Stop or an error) until the
+   *  user sends something. */
+  queueHeld: Record<string, boolean>;
 
   init: () => Promise<void>;
   loadSessions: (workspaceId?: string) => Promise<void>;
@@ -41,6 +62,16 @@ interface ChatState {
   newSession: (workspaceId: string, agentProfileId?: string, providerId?: string, modelName?: string) => Promise<string>;
   send: (text: string, attachments: string[]) => Promise<void>;
   cancel: () => Promise<void>;
+  /** Send to a specific session (the active one or a queued one). */
+  sendTo: (sessionId: string, text: string, attachments: string[]) => Promise<void>;
+  /** A session's turn ended: requeue unused steering, send the next. */
+  turnEnded: (sessionId: string, hold?: boolean) => void;
+  enqueue: (text: string, attachments: string[]) => void;
+  removeQueued: (id: string) => void;
+  /** Steer the running turn with `text` (falls back to the queue). */
+  steer: (text: string) => Promise<void>;
+  /** Move a queued message into the running turn. */
+  steerQueued: (id: string) => Promise<void>;
   decide: (approvalId: string, approved: boolean, grant?: string) => Promise<void>;
   setModel: (providerId: string, modelName: string) => Promise<void>;
   setAgent: (profileId: string) => Promise<void>;
@@ -62,6 +93,28 @@ function scheduleSessionsRefresh(load: () => Promise<void>) {
   }, 400);
 }
 
+/** Sessions with a running turn, from status events of every session. */
+const running = new Set<string>();
+
+/** `send_message` can race the runtime releasing the session right after
+ *  the idle event, so retry briefly while it reports a running turn. */
+async function sendWhenFree(sessionId: string, text: string, attachments: string[]) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api.sendMessage(sessionId, text, attachments);
+    } catch (e) {
+      if (attempt >= 20 || !String(e).includes("already running")) throw e;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+}
+
+/** Recent user message ids from events (see `steer`). */
+const seenUserMessages = new Set<string>();
+
+let nextLocalId = 0;
+const localId = () => `local-${Date.now()}-${nextLocalId++}`;
+
 export const useChat = create<ChatState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -75,6 +128,9 @@ export const useChat = create<ChatState>((set, get) => ({
   lastError: null,
   usage: null,
   initialized: false,
+  queued: {},
+  steering: {},
+  queueHeld: {},
 
   init: async () => {
     if (get().initialized) return;
@@ -82,6 +138,11 @@ export const useChat = create<ChatState>((set, get) => ({
     await Promise.all([get().loadSessions(), get().loadProfiles()]);
 
     await events.chatStatus((e) => {
+      if (e.status === "idle") {
+        if (running.has(e.session_id)) get().turnEnded(e.session_id, e.detail === "cancelled");
+      } else {
+        running.add(e.session_id);
+      }
       if (e.session_id !== get().activeSessionId) return;
       set({ status: e.status, statusDetail: e.detail ?? null });
     });
@@ -111,6 +172,16 @@ export const useChat = create<ChatState>((set, get) => ({
       if (frame === null) frame = requestAnimationFrame(flush);
     });
     await events.chatMessage((e) => {
+      if (e.message.role === "user") {
+        seenUserMessages.add(e.message.id);
+        if (seenUserMessages.size > 200) seenUserMessages.delete(seenUserMessages.values().next().value!);
+      }
+      const steering = get().steering[e.session_id];
+      if (steering?.some((m) => m.id === e.message.id)) {
+        set((s) => ({
+          steering: { ...s.steering, [e.session_id]: steering.filter((m) => m.id !== e.message.id) },
+        }));
+      }
       if (e.session_id !== get().activeSessionId) {
         scheduleSessionsRefresh(get().loadSessions);
         return;
@@ -170,6 +241,8 @@ export const useChat = create<ChatState>((set, get) => ({
       });
     });
     await events.chatError((e) => {
+      // The idle status that follows must not send the next queued message.
+      set((s) => ({ queueHeld: { ...s.queueHeld, [e.session_id]: true } }));
       if (e.session_id !== get().activeSessionId) return;
       pending = null;
       set({ lastError: e.error, status: "idle", streaming: null });
@@ -196,7 +269,8 @@ export const useChat = create<ChatState>((set, get) => ({
       toolRuns: detail.tool_runs,
       approvals: detail.approvals,
       streaming: null,
-      status: "idle",
+      // A turn may still be running in the session we switch to.
+      status: running.has(id) ? "thinking" : "idle",
       statusDetail: null,
       lastError: null,
     });
@@ -212,8 +286,89 @@ export const useChat = create<ChatState>((set, get) => ({
   send: async (text, attachments) => {
     const id = get().activeSessionId;
     if (!id) throw new Error("no active session");
-    set({ lastError: null, status: "thinking" });
-    await api.sendMessage(id, text, attachments);
+    await get().sendTo(id, text, attachments);
+  },
+
+  sendTo: async (sessionId, text, attachments) => {
+    // Sending by hand releases a held queue.
+    set((s) => ({ queueHeld: { ...s.queueHeld, [sessionId]: false } }));
+    if (sessionId === get().activeSessionId) set({ lastError: null, status: "thinking" });
+    running.add(sessionId);
+    try {
+      await sendWhenFree(sessionId, text, attachments);
+    } catch (e) {
+      running.delete(sessionId);
+      if (sessionId === get().activeSessionId) set({ status: "idle" });
+      throw e;
+    }
+  },
+
+  // When a turn ends: steering messages it never picked up go back to
+  // the front of the queue, then the next queued message is sent (unless
+  // the turn was stopped or failed).
+  turnEnded: (sessionId, hold = false) => {
+    running.delete(sessionId);
+    const leftover = get().steering[sessionId] ?? [];
+    const queue: QueuedMessage[] = [
+      ...leftover.map((m) => ({ id: m.id, text: m.text, attachments: [] })),
+      ...(get().queued[sessionId] ?? []),
+    ];
+    const held = hold || get().queueHeld[sessionId] === true;
+    const next = held ? undefined : queue[0];
+    const rest = next ? queue.slice(1) : queue;
+    set((s) => ({
+      steering: { ...s.steering, [sessionId]: [] },
+      queued: { ...s.queued, [sessionId]: rest },
+      queueHeld: { ...s.queueHeld, [sessionId]: held && queue.length > 0 },
+    }));
+    if (next) void get().sendTo(sessionId, next.text, next.attachments).catch((err) => {
+      set((s) => ({
+        lastError: sessionId === s.activeSessionId ? String(err) : s.lastError,
+        queued: { ...s.queued, [sessionId]: [next, ...(s.queued[sessionId] ?? [])] },
+        queueHeld: { ...s.queueHeld, [sessionId]: true },
+      }));
+    });
+  },
+
+  enqueue: (text, attachments) => {
+    const id = get().activeSessionId;
+    if (!id) return;
+    set((s) => ({
+      queued: { ...s.queued, [id]: [...(s.queued[id] ?? []), { id: localId(), text, attachments }] },
+    }));
+  },
+
+  removeQueued: (msgId) => {
+    const id = get().activeSessionId;
+    if (!id) return;
+    set((s) => ({
+      queued: { ...s.queued, [id]: (s.queued[id] ?? []).filter((m) => m.id !== msgId) },
+    }));
+  },
+
+  steer: async (text) => {
+    const id = get().activeSessionId;
+    if (!id) return;
+    const accepted = running.has(id) ? await api.steerMessage(id, text) : null;
+    if (!accepted) {
+      // The turn ended meanwhile: it becomes the next message instead.
+      get().enqueue(text, []);
+      if (!running.has(id)) get().turnEnded(id);
+      return;
+    }
+    // Already injected (its message can arrive before this reply).
+    if (seenUserMessages.has(accepted)) return;
+    set((s) => ({ steering: { ...s.steering, [id]: [...(s.steering[id] ?? []), { id: accepted, text }] } }));
+    // Accepted just as the turn was ending: the runtime dropped it.
+    if (!running.has(id)) get().turnEnded(id);
+  },
+
+  steerQueued: async (msgId) => {
+    const id = get().activeSessionId;
+    const item = id ? get().queued[id]?.find((m) => m.id === msgId) : undefined;
+    if (!id || !item) return;
+    get().removeQueued(msgId);
+    await get().steer(item.text);
   },
 
   cancel: async () => {

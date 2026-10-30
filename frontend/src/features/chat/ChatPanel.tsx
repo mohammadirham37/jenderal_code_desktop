@@ -16,7 +16,9 @@ import {
   ChevronRight,
   Copy,
   History,
+  ListPlus,
   MessageSquarePlus,
+  Navigation,
   Paperclip,
   Pause,
   Play,
@@ -29,14 +31,14 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useChat } from "@/stores/chat";
+import { useChat, type QueuedMessage, type SteeringMessage } from "@/stores/chat";
 import { useSkills } from "@/stores/skills";
 import { useApp } from "@/stores/app";
 import { useEditor } from "@/stores/editor";
 import { useProviders } from "@/stores/providers";
 import { api, type ApprovalRecord, type MessageRecord, type ToolRunRecord } from "@/lib/ipc";
 import { Badge, IconButton, Spinner } from "@/components/ui";
-import { ToolRunCard } from "./ToolRunCard";
+import { TodoDock, ToolRunCard } from "./ToolRunCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { ContextMeter } from "./ContextMeter";
 
@@ -104,6 +106,9 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
       hasStreaming: s.streaming !== null,
     })),
   );
+  const queued = useChat((s) => (s.activeSessionId ? s.queued[s.activeSessionId] : undefined)) ?? NONE_QUEUED;
+  const steering = useChat((s) => (s.activeSessionId ? s.steering[s.activeSessionId] : undefined)) ?? NONE_STEERING;
+  const queueHeld = useChat((s) => (s.activeSessionId ? s.queueHeld[s.activeSessionId] === true : false));
   const openFile = useEditor((s) => s.openFile);
   const openDiff = useEditor((s) => s.openDiff);
 
@@ -152,12 +157,23 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
     return () => clearTimeout(t);
   }, [notice]);
 
-  const send = async (override?: string) => {
+  /** While the agent works, Enter queues the message (sent when the turn
+   *  ends) and ⌘/Ctrl+Enter steers the running turn with it. */
+  const send = async (override?: string, mode: "send" | "steer" = "send") => {
     const text = (override ?? input).trim();
-    if (!text || !chat.activeSessionId || busy) return;
+    if (!text || !chat.activeSessionId) return;
     const files = attachments;
     setInput("");
     setAttachments([]);
+    if (busy) {
+      if (mode === "steer" && files.length === 0) {
+        await useChat.getState().steer(text);
+      } else {
+        if (mode === "steer") setNotice("Messages with attachments can't steer; queued for after this turn.");
+        useChat.getState().enqueue(text, files);
+      }
+      return;
+    }
     try {
       await useChat.getState().send(text, files);
     } catch (e) {
@@ -232,15 +248,6 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
         <span className="min-w-0 truncate font-display text-[14px] font-semibold" title={session?.title}>
           {session?.title ?? "New conversation"}
         </span>
-        {busy && (
-          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-accent-600 dark:text-accent-400">
-            <Spinner className="h-3 w-3" />
-            {STATUS_LABEL[chat.status] ?? chat.status}
-            {chat.statusDetail && (
-              <span className="max-w-40 truncate text-neutral-500">— {chat.statusDetail}</span>
-            )}
-          </span>
-        )}
         <div className="ml-auto flex items-center gap-0.5">
           {!full && (
             <div className="relative">
@@ -321,6 +328,15 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
             ),
           )}
           <StreamingBubble full={full} />
+          {busy && (
+            <div className="flex items-center gap-1.5 text-[11px] text-accent-600 dark:text-accent-400">
+              <Spinner className="h-3 w-3" />
+              {STATUS_LABEL[chat.status] ?? chat.status}
+              {chat.statusDetail && (
+                <span className="min-w-0 truncate text-neutral-500">— {chat.statusDetail}</span>
+              )}
+            </div>
+          )}
         </div>
       </ScrollFollow>
 
@@ -334,6 +350,19 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
           {notice && (
             <div className="mb-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-500">{notice}</div>
           )}
+          <TodoDock key={chat.activeSessionId} runs={chat.toolRuns} />
+          <PendingMessages
+            steering={steering}
+            queued={queued}
+            held={queueHeld && !busy}
+            canSteer={busy}
+            onSendNext={() => {
+              const id = chat.activeSessionId;
+              if (!id) return;
+              useChat.setState((st) => ({ queueHeld: { ...st.queueHeld, [id]: false } }));
+              useChat.getState().turnEnded(id);
+            }}
+          />
           <div
             className={`relative rounded-md border border-neutral-300 bg-white transition-colors focus-within:border-accent-500 dark:border-neutral-700 dark:bg-neutral-925 ${
               full ? "shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)]" : ""
@@ -366,7 +395,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                 if (slash.onKeyDown(e)) return;
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  void send();
+                  void send(undefined, e.metaKey || e.ctrlKey ? "steer" : "send");
                 }
               }}
               placeholder={
@@ -389,15 +418,31 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
               <ComposerControls />
               <div className="ml-auto flex items-center gap-1">
                 <ContextMeter />
-                {!full && <span className="hidden text-[10px] text-neutral-400 xl:inline">⏎ send · ⇧⏎ newline</span>}
+                {!full && (
+                  <span className="hidden text-[10px] text-neutral-400 xl:inline">
+                    {busy ? "⏎ queue · ⌘⏎ steer" : "⏎ send · ⇧⏎ newline"}
+                  </span>
+                )}
                 {busy ? (
-                  <button
-                    title="Stop"
-                    onClick={() => void useChat.getState().cancel()}
-                    className="flex h-7 items-center gap-1 rounded-[5px] bg-red-600 px-2 font-mono text-[10px] uppercase tracking-wider text-white hover:bg-red-500"
-                  >
-                    <Square size={9} fill="currentColor" /> Stop
-                  </button>
+                  <>
+                    {input.trim() && (
+                      <>
+                        <IconButton title={`Steer the running turn (${isMac ? "⌘" : "Ctrl+"}Enter)`} onClick={() => void send(undefined, "steer")}>
+                          <Navigation size={13} />
+                        </IconButton>
+                        <IconButton title="Queue for after this turn (Enter)" onClick={() => void send()}>
+                          <ListPlus size={13} />
+                        </IconButton>
+                      </>
+                    )}
+                    <button
+                      title="Stop"
+                      onClick={() => void useChat.getState().cancel()}
+                      className="flex h-7 items-center gap-1 rounded-[5px] bg-red-600 px-2 font-mono text-[10px] uppercase tracking-wider text-white hover:bg-red-500"
+                    >
+                      <Square size={9} fill="currentColor" /> Stop
+                    </button>
+                  </>
                 ) : (
                   <button
                     title="Send (Enter)"
@@ -413,11 +458,87 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
           </div>
           {full && (
             <div className="mt-1.5 text-center text-[10px] text-neutral-400">
-              Enter to send · Shift+Enter for newline · drag files from the explorer to attach
+              {busy
+                ? `Enter to queue · ${isMac ? "⌘" : "Ctrl+"}Enter to steer the running turn · Shift+Enter for newline`
+                : "Enter to send · Shift+Enter for newline · drag files from the explorer to attach"}
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const NONE_QUEUED: QueuedMessage[] = [];
+const NONE_STEERING: SteeringMessage[] = [];
+const isMac = navigator.platform.toUpperCase().includes("MAC");
+
+/** Messages written while the agent works: steering ones waiting for the
+ *  next step of the running turn, and queued ones for after it. */
+function PendingMessages({
+  steering,
+  queued,
+  held,
+  canSteer,
+  onSendNext,
+}: {
+  steering: SteeringMessage[];
+  queued: QueuedMessage[];
+  held: boolean;
+  canSteer: boolean;
+  onSendNext: () => void;
+}) {
+  if (steering.length === 0 && queued.length === 0) return null;
+  const row = "flex items-center gap-2 px-2.5 py-1 text-[12px]";
+  return (
+    <div className="animate-rise mb-1.5 divide-y divide-neutral-200 overflow-hidden rounded-[5px] border border-neutral-200 bg-neutral-50 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900">
+      {steering.map((m) => (
+        <div key={m.id} className={row} title="Joins the running turn after its current step">
+          <Navigation size={11} className="shrink-0 text-accent-600 dark:text-accent-400" />
+          <span className="eyebrow shrink-0 text-accent-600 dark:text-accent-400">Steer</span>
+          <span className="min-w-0 flex-1 truncate text-neutral-700 dark:text-neutral-300">{m.text}</span>
+          <Spinner className="h-3 w-3 shrink-0 text-neutral-400" />
+        </div>
+      ))}
+      {queued.map((m, i) => (
+        <div key={m.id} className={`group ${row}`}>
+          <span className="eyebrow w-10 shrink-0">{i === 0 ? "Next" : `#${i + 1}`}</span>
+          <span className="min-w-0 flex-1 truncate text-neutral-700 dark:text-neutral-300">{m.text}</span>
+          {m.attachments.length > 0 && (
+            <span className="shrink-0 font-mono text-[10px] text-neutral-500">
+              <Paperclip size={10} className="mr-0.5 inline" />
+              {m.attachments.length}
+            </span>
+          )}
+          {canSteer && m.attachments.length === 0 && (
+            <button
+              title="Steer the running turn with this message now"
+              onClick={() => void useChat.getState().steerQueued(m.id)}
+              className="shrink-0 rounded-[3px] p-0.5 text-neutral-500 hover:bg-neutral-200 hover:text-accent-600 dark:hover:bg-neutral-800 dark:hover:text-accent-400"
+            >
+              <Navigation size={11} />
+            </button>
+          )}
+          <button
+            title="Remove from queue"
+            onClick={() => useChat.getState().removeQueued(m.id)}
+            className="shrink-0 rounded-[3px] p-0.5 text-neutral-500 hover:bg-neutral-200 hover:text-red-500 dark:hover:bg-neutral-800"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      ))}
+      {held && queued.length > 0 && (
+        <div className={`${row} justify-between text-[11px] text-neutral-500`}>
+          <span>Queue paused: the last turn was stopped or failed.</span>
+          <button
+            onClick={onSendNext}
+            className="flex items-center gap-1 rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-accent-600 hover:bg-accent-500/10 dark:text-accent-400"
+          >
+            <Play size={9} fill="currentColor" /> Send next
+          </button>
+        </div>
+      )}
     </div>
   );
 }

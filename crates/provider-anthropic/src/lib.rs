@@ -76,10 +76,23 @@ impl AnthropicProvider {
                         "content": [{"type": "text", "text": m.content}]
                     }));
                 }
-                Role::User => out.push(json!({
-                    "role": "user",
-                    "content": [{"type": "text", "text": m.content}]
-                })),
+                Role::User => {
+                    // A user message right after tool results (steering)
+                    // joins their turn: roles must alternate.
+                    if let Some(last) = out.last_mut() {
+                        if last["role"] == "user" && last["content"].is_array() {
+                            last["content"]
+                                .as_array_mut()
+                                .unwrap()
+                                .push(json!({"type": "text", "text": m.content}));
+                            continue;
+                        }
+                    }
+                    out.push(json!({
+                        "role": "user",
+                        "content": [{"type": "text", "text": m.content}]
+                    }));
+                }
                 Role::Assistant => {
                     let mut blocks = Vec::new();
                     if !m.content.is_empty() {
@@ -480,6 +493,47 @@ mod tests {
         assert_eq!(blocks[0]["type"], "tool_result");
         assert_eq!(blocks[0]["tool_use_id"], "t1");
         assert_eq!(blocks[1]["tool_use_id"], "t2");
+    }
+
+    #[test]
+    fn user_message_after_tool_results_joins_their_turn() {
+        let req = ModelRequest {
+            model: "claude-test".into(),
+            messages: vec![
+                ChatMessage::new(Role::User, "hi"),
+                ChatMessage {
+                    role: Role::Assistant,
+                    content: String::new(),
+                    tool_calls: vec![ToolCall {
+                        id: "t1".into(),
+                        name: "fs_read".into(),
+                        arguments: "{}".into(),
+                    }],
+                    tool_call_id: None,
+                    tool_name: None,
+                    reasoning: None,
+                },
+                ChatMessage {
+                    role: Role::Tool,
+                    content: "A".into(),
+                    tool_calls: vec![],
+                    tool_call_id: Some("t1".into()),
+                    tool_name: Some("fs_read".into()),
+                    reasoning: None,
+                },
+                ChatMessage::new(Role::User, "also check b"),
+            ],
+            tools: vec![],
+            system: None,
+            temperature: None,
+            max_tokens: Some(100),
+        };
+        let msgs = AnthropicProvider::convert_messages(&req).unwrap();
+        assert_eq!(msgs.len(), 3, "roles keep alternating");
+        let blocks = msgs[2]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "tool_result");
+        assert_eq!(blocks[1]["type"], "text");
+        assert_eq!(blocks[1]["text"], "also check b");
     }
 
     async fn collect(chunks: Vec<Vec<u8>>) -> Vec<StreamEvent> {

@@ -458,6 +458,8 @@ export const api = {
   getSessionDetail: (sessionId: string) => invoke<SessionDetail>("get_session_detail", { sessionId }),
   sendMessage: (sessionId: string, content: string, attachments: string[]) =>
     invoke<void>("send_message", { sessionId, content, attachments }),
+  /** Add a message to the running turn; `null` when no turn is running. */
+  steerMessage: (sessionId: string, content: string) => invoke<string | null>("steer_message", { sessionId, content }),
   cancelGeneration: (sessionId: string) => invoke<void>("cancel_generation", { sessionId }),
   decideApproval: (approvalId: string, approved: boolean, grant?: string) =>
     invoke<void>("decide_approval", { approvalId, approved, grant: grant ?? null }),

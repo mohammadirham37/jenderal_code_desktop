@@ -588,6 +588,13 @@ pub async fn send_message(
         .map_err(err)
 }
 
+/// Add a message to the running turn (steering). `None` when no turn is
+/// running; the frontend then sends it as a normal message.
+#[tauri::command]
+pub fn steer_message(state: State<'_, AppState>, session_id: String, content: String) -> Option<String> {
+    state.runtime.steer(&session_id, &content)
+}
+
 #[tauri::command]
 pub async fn cancel_generation(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state.runtime.cancel(&session_id).await.map_err(err)
