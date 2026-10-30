@@ -78,6 +78,9 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 fn main() {
+    // Agent commands need the user's login-shell PATH (Homebrew, nvm, ...);
+    // resolve it off the startup path.
+    std::thread::spawn(jcode_tool_terminal::user_path::init_from_login_shell);
     tauri::Builder::default()
         .plugin(navigation_guard())
         .plugin(tauri_plugin_dialog::init())

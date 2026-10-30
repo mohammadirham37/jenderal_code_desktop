@@ -109,7 +109,7 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
             "Run a shell command in the workspace root and return combined output. Use it for builds, tests, and inspections.",
             json!({
                 "command": {"type": "string"},
-                "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (1000-600000; default 60000)"}
+                "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (1000-600000; default 120000)"}
             }),
             &["command"],
         ),

@@ -14,7 +14,9 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::watch;
 
-pub const DEFAULT_TIMEOUT_MS: u64 = 60_000;
+pub mod user_path;
+
+pub const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 pub const MAX_TIMEOUT_MS: u64 = 600_000;
 pub const DEFAULT_MAX_OUTPUT: usize = 256 * 1024;
 
@@ -159,6 +161,9 @@ pub async fn run_exec(spec: &ExecSpec, cancel: &CancelToken) -> Result<ExecResul
         .stderr(Stdio::piped());
     for key in scrubbed_env_keys() {
         cmd.env_remove(key);
+    }
+    if let Some(path) = user_path::user_path() {
+        cmd.env("PATH", path);
     }
 
     #[cfg(unix)]
