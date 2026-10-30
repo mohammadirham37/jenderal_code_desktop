@@ -42,6 +42,9 @@ pub struct ChatDeltaEvent {
     pub session_id: String,
     pub message_id: String,
     pub delta: String,
+    /// The delta is model reasoning, not answer text.
+    #[serde(default)]
+    pub reasoning: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -391,6 +391,7 @@ mod tests {
                     }],
                     tool_call_id: None,
                     tool_name: None,
+                    reasoning: None,
                 },
                 ChatMessage {
                     role: Role::Tool,
@@ -398,6 +399,7 @@ mod tests {
                     tool_calls: vec![],
                     tool_call_id: Some("c1".into()),
                     tool_name: Some("fs_read".into()),
+                    reasoning: None,
                 },
             ],
             tools: vec![ToolSpec {

@@ -20,6 +20,8 @@ const FLUSH_BYTES: usize = 2048;
 
 struct PendingDelta {
     message_id: String,
+    /// Buffered text is model reasoning rather than answer text.
+    reasoning: bool,
     text: String,
     /// A background flush task is already scheduled for this session.
     scheduled: bool,
@@ -54,28 +56,33 @@ impl DeltaCoalescer {
                 session_id: session_id.to_string(),
                 message_id: p.message_id,
                 delta: p.text,
+                reasoning: p.reasoning,
             });
         }
     }
 
-    pub fn push(&self, session_id: &str, message_id: &str, delta: &str) -> DeltaAction {
+    pub fn push(&self, session_id: &str, message_id: &str, delta: &str, reasoning: bool) -> DeltaAction {
         let mut map = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        // A delta for a different message flushes the previous one first.
+        // A delta for a different message, or switching between reasoning
+        // and answer text, flushes the buffered text first.
         if let Some(p) = map.get_mut(session_id) {
-            if p.message_id != message_id {
+            if p.message_id != message_id || p.reasoning != reasoning {
                 let text = std::mem::take(&mut p.text);
                 let old_id = std::mem::replace(&mut p.message_id, message_id.to_string());
+                let old_reasoning = std::mem::replace(&mut p.reasoning, reasoning);
                 if !text.is_empty() {
                     (self.emit_delta)(ChatDeltaEvent {
                         session_id: session_id.to_string(),
                         message_id: old_id,
                         delta: text,
+                        reasoning: old_reasoning,
                     });
                 }
             }
         }
         let entry = map.entry(session_id.to_string()).or_insert_with(|| PendingDelta {
             message_id: message_id.to_string(),
+            reasoning,
             text: String::new(),
             scheduled: false,
         });
@@ -86,6 +93,7 @@ impl DeltaCoalescer {
                 session_id: session_id.to_string(),
                 message_id: entry.message_id.clone(),
                 delta: text,
+                reasoning: entry.reasoning,
             });
             return DeltaAction::None;
         }
@@ -127,6 +135,17 @@ impl TauriEventSink {
         Self { app, deltas }
     }
 
+    fn push_delta(&self, session_id: &str, message_id: &str, delta: &str, reasoning: bool) {
+        if let DeltaAction::ScheduleFlush = self.deltas.push(session_id, message_id, delta, reasoning) {
+            let deltas = self.deltas.clone();
+            let sid = session_id.to_string();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(FLUSH_INTERVAL).await;
+                deltas.flush(&sid);
+            });
+        }
+    }
+
     /// Flush buffered deltas for the session, then emit `event`.
     fn emit_ordered<T: serde::Serialize + Clone>(&self, session_id: &str, name: &str, event: T) {
         self.deltas.flush_then(session_id, || {
@@ -150,14 +169,11 @@ impl EventSink for TauriEventSink {
     }
 
     async fn delta(&self, session_id: &str, message_id: &str, delta: &str) {
-        if let DeltaAction::ScheduleFlush = self.deltas.push(session_id, message_id, delta) {
-            let deltas = self.deltas.clone();
-            let sid = session_id.to_string();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(FLUSH_INTERVAL).await;
-                deltas.flush(&sid);
-            });
-        }
+        self.push_delta(session_id, message_id, delta, false);
+    }
+
+    async fn reasoning_delta(&self, session_id: &str, message_id: &str, delta: &str) {
+        self.push_delta(session_id, message_id, delta, true);
     }
 
     async fn message(&self, session_id: &str, message: &MessageRecord) {
@@ -231,8 +247,8 @@ mod tests {
     #[test]
     fn deltas_are_coalesced_until_flush() {
         let (out, c) = collector();
-        assert!(matches!(c.push("s", "m", "a"), DeltaAction::ScheduleFlush));
-        assert!(matches!(c.push("s", "m", "b"), DeltaAction::None));
+        assert!(matches!(c.push("s", "m", "a", false), DeltaAction::ScheduleFlush));
+        assert!(matches!(c.push("s", "m", "b", false), DeltaAction::None));
         assert!(out.lock().unwrap().is_empty());
         c.flush("s");
         let evs = out.lock().unwrap();
@@ -244,8 +260,8 @@ mod tests {
     #[test]
     fn other_event_flushes_first_and_size_cap_flushes() {
         let (out, c) = collector();
-        c.push("s", "m", "x");
-        c.push("t", "m2", "other session");
+        c.push("s", "m", "x", false);
+        c.push("t", "m2", "other session", false);
         let order = Arc::new(Mutex::new(Vec::new()));
         let o2 = order.clone();
         let out2 = out.clone();
@@ -255,16 +271,29 @@ mod tests {
         // The delta was emitted before the follow-up event ran.
         assert_eq!(*order.lock().unwrap(), vec![1]);
         let big = "y".repeat(FLUSH_BYTES);
-        c.push("s", "m", &big);
+        c.push("s", "m", &big, false);
         assert_eq!(out.lock().unwrap().len(), 2);
         // Message change flushes previous message's text.
-        c.push("s", "m", "1");
-        c.push("s", "n", "2");
+        c.push("s", "m", "1", false);
+        c.push("s", "n", "2", false);
         c.flush("s");
         let evs = out.lock().unwrap();
         assert_eq!(evs[2].message_id, "m");
         assert_eq!(evs[3].message_id, "n");
         // Other session untouched until flushed.
         assert!(evs.iter().all(|e| e.session_id == "s"));
+    }
+
+    #[test]
+    fn reasoning_and_text_are_buffered_separately() {
+        let (out, c) = collector();
+        c.push("s", "m", "think", true);
+        c.push("s", "m", "ing", true);
+        c.push("s", "m", "answer", false);
+        c.flush("s");
+        let evs = out.lock().unwrap();
+        assert_eq!(evs.len(), 2);
+        assert_eq!((evs[0].delta.as_str(), evs[0].reasoning), ("thinking", true));
+        assert_eq!((evs[1].delta.as_str(), evs[1].reasoning), ("answer", false));
     }
 }

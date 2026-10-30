@@ -26,9 +26,11 @@ const MIN_HISTORY_CHARS: usize = 16_000;
 /// Rough chars-per-token ratio used to turn a context window into a budget.
 const CHARS_PER_TOKEN: usize = 3;
 const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 4_096;
-/// Tool results older than this many trailing messages are shortened in
-/// the request (the DB keeps the full content).
-const KEEP_RECENT_FULL: usize = 6;
+/// The newest tool results, up to this many characters in total (about 40k
+/// tokens), are always sent in full; older ones are shortened in the request
+/// (the DB keeps the full content). Counting by size rather than by message
+/// keeps a file the model read a few calls ago intact within a turn.
+const PROTECTED_TOOL_CHARS: usize = 120_000;
 const OLD_TOOL_RESULT_BYTES: usize = 2_048;
 
 /// Build the full system prompt: profile prompt + environment + project
@@ -205,8 +207,21 @@ pub fn history_budget(context_window: Option<u64>, max_output_tokens: Option<u64
 /// old tool results, and fit into the budget. Does not touch the DB.
 pub fn prepare_history(history: &[ChatMessage], budget: usize) -> Vec<ChatMessage> {
     let mut msgs = sanitize_tool_pairs(history.to_vec());
-    truncate_old_tool_results(&mut msgs, KEEP_RECENT_FULL, OLD_TOOL_RESULT_BYTES);
+    drop_reasoning_before_last_user(&mut msgs);
+    let budget_chars = if budget == 0 { DEFAULT_HISTORY_CHARS } else { budget };
+    let protect = PROTECTED_TOOL_CHARS.min(budget_chars / 2);
+    truncate_old_tool_results(&mut msgs, protect, OLD_TOOL_RESULT_BYTES);
     fit_history(msgs, budget)
+}
+
+/// Reasoning is sent back only for the turn in progress (after the last user
+/// message): models with interleaved thinking (GLM, DeepSeek) need it between
+/// tool calls, while reasoning from earlier turns only costs context.
+pub fn drop_reasoning_before_last_user(messages: &mut [ChatMessage]) {
+    let last_user = messages.iter().rposition(|m| m.role == Role::User).unwrap_or(0);
+    for m in &mut messages[..last_user] {
+        m.reasoning = None;
+    }
 }
 
 /// Make the history valid for providers that require strict tool-call /
@@ -246,12 +261,19 @@ pub fn sanitize_tool_pairs(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
     out
 }
 
-/// Shorten tool results older than the last `keep_recent` messages to their
-/// first `max_bytes` bytes plus a truncation marker.
-pub fn truncate_old_tool_results(messages: &mut [ChatMessage], keep_recent: usize, max_bytes: usize) {
-    let cutoff = messages.len().saturating_sub(keep_recent);
-    for m in &mut messages[..cutoff] {
-        if m.role == Role::Tool && m.content.len() > max_bytes {
+/// Keep the newest tool results in full until they add up to
+/// `protected_chars`; shorten every older one to its first `max_bytes` bytes
+/// plus a truncation marker.
+pub fn truncate_old_tool_results(messages: &mut [ChatMessage], protected_chars: usize, max_bytes: usize) {
+    let mut kept = 0usize;
+    let mut window_full = false;
+    for m in messages.iter_mut().rev().filter(|m| m.role == Role::Tool) {
+        if !window_full && kept + m.content.len() <= protected_chars {
+            kept += m.content.len();
+            continue;
+        }
+        window_full = true;
+        if m.content.len() > max_bytes {
             let mut end = max_bytes;
             while !m.content.is_char_boundary(end) {
                 end -= 1;
@@ -265,6 +287,7 @@ pub fn truncate_old_tool_results(messages: &mut [ChatMessage], keep_recent: usiz
 
 fn message_size(m: &ChatMessage) -> usize {
     m.content.len()
+        + m.reasoning.as_ref().map_or(0, String::len)
         + m
             .tool_calls
             .iter()
@@ -478,10 +501,57 @@ mod tests {
             history.push(ChatMessage::new(Role::User, format!("u{i}")));
             history.push(ChatMessage::new(Role::Assistant, format!("a{i}")));
         }
-        let out = prepare_history(&history, 0);
+        // A small budget shrinks the protected window below the 10 KB result.
+        let out = prepare_history(&history, MIN_HISTORY_CHARS);
         assert!(out[2].content.len() < 3_000);
         assert!(out[2].content.contains("[truncated"));
         assert_eq!(history[2].content.len(), 10_000, "input untouched");
+    }
+
+    #[test]
+    fn recent_tool_results_stay_whole_regardless_of_message_count() {
+        let file = "f".repeat(20_000);
+        let mut msgs = vec![ChatMessage::new(Role::User, "u")];
+        // One read followed by many small calls: by message count the read
+        // would be "old", but it is well inside the protected size.
+        msgs.push(assistant_calls(&["read"]));
+        msgs.push(tool_result("read", &file));
+        for i in 0..10 {
+            let id = format!("c{i}");
+            msgs.push(assistant_calls(&[id.as_str()]));
+            msgs.push(tool_result(&id, "ok"));
+        }
+        truncate_old_tool_results(&mut msgs, 50_000, 2_048);
+        assert_eq!(msgs[2].content.len(), 20_000);
+
+        // Past the window, older results are shortened; newer ones are not.
+        let mut msgs = vec![
+            tool_result("old", &file),
+            tool_result("mid", &file),
+            tool_result("new", &file),
+        ];
+        truncate_old_tool_results(&mut msgs, 45_000, 2_048);
+        assert!(msgs[0].content.contains("[truncated"));
+        assert_eq!(msgs[1].content.len(), 20_000);
+        assert_eq!(msgs[2].content.len(), 20_000);
+    }
+
+    #[test]
+    fn reasoning_is_kept_only_for_the_current_turn() {
+        let mut old = ChatMessage::new(Role::Assistant, "earlier answer");
+        old.reasoning = Some("old thoughts".into());
+        let mut call = assistant_calls(&["a"]);
+        call.reasoning = Some("current thoughts".into());
+        let history = vec![
+            ChatMessage::new(Role::User, "first"),
+            old,
+            ChatMessage::new(Role::User, "second"),
+            call,
+            tool_result("a", "r"),
+        ];
+        let out = prepare_history(&history, 0);
+        assert_eq!(out[1].reasoning, None);
+        assert_eq!(out[3].reasoning.as_deref(), Some("current thoughts"));
     }
 
     #[test]

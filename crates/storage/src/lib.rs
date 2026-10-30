@@ -16,6 +16,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("003_indexes", include_str!("../migrations/003_indexes.sql")),
     ("004_raise_iteration_limit", include_str!("../migrations/004_raise_iteration_limit.sql")),
     ("005_show_hidden_files", include_str!("../migrations/005_show_hidden_files.sql")),
+    ("006_message_reasoning", include_str!("../migrations/006_message_reasoning.sql")),
 ];
 
 pub struct Db {
@@ -633,8 +634,8 @@ impl Db {
     pub fn append_message(&self, m: &MessageRecord) -> Result<()> {
         self.with_conn(|conn| {
             conn.prepare_cached(
-                "INSERT INTO messages(id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO messages(id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at, reasoning)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             )?
             .execute(params![
                     m.id,
@@ -649,6 +650,7 @@ impl Db {
                     m.tool_call_id,
                     m.tool_name,
                     m.created_at,
+                    m.reasoning,
                 ])?;
             conn.prepare_cached("UPDATE sessions SET updated_at = ?2 WHERE id = ?1")?
                 .execute(params![m.session_id, now_ms()])?;
@@ -668,7 +670,7 @@ impl Db {
     pub fn list_messages(&self, session_id: &str) -> Result<Vec<MessageRecord>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare_cached(
-                "SELECT id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at
+                "SELECT id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at, reasoning
                  FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
             let rows = stmt.query_map(params![session_id], |r| {
@@ -688,6 +690,7 @@ impl Db {
                     tool_call_id: r.get(5)?,
                     tool_name: r.get(6)?,
                     created_at: r.get(7)?,
+                    reasoning: r.get(8)?,
                 })
             })?;
             rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
@@ -1207,6 +1210,7 @@ mod tests {
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
+            reasoning: None,
             created_at: now_ms(),
         };
         d.append_message(&m).unwrap();
@@ -1216,6 +1220,30 @@ mod tests {
         // `_` and `%` must be literal, not wildcards.
         assert!(d.search_sessions("done_o_").unwrap().is_empty());
         assert!(d.search_sessions("1%done").unwrap().is_empty());
+    }
+
+    #[test]
+    fn message_reasoning_round_trips() {
+        let d = db();
+        let w = d.upsert_workspace("/tmp/p-reason", "p").unwrap();
+        let s = d.create_session(&w.id, "t", None, None, None).unwrap();
+        for reasoning in [Some("thinking about it".to_string()), None] {
+            d.append_message(&MessageRecord {
+                id: new_id(),
+                session_id: s.id.clone(),
+                role: Role::Assistant,
+                content: "answer".into(),
+                tool_calls: vec![],
+                tool_call_id: None,
+                tool_name: None,
+                reasoning,
+                created_at: now_ms(),
+            })
+            .unwrap();
+        }
+        let msgs = d.list_messages(&s.id).unwrap();
+        assert_eq!(msgs[0].reasoning.as_deref(), Some("thinking about it"));
+        assert_eq!(msgs[1].reasoning, None);
     }
 
     #[test]
@@ -1289,6 +1317,7 @@ mod tests {
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
+            reasoning: None,
             created_at: now_ms(),
         };
         d.append_message(&m).unwrap();
@@ -1456,6 +1485,7 @@ mod tests {
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
+            reasoning: None,
             created_at: now_ms(),
         })
         .unwrap();

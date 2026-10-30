@@ -36,6 +36,8 @@ pub use jcode_permissions::PolicyMode;
 pub trait EventSink: Send + Sync {
     async fn status(&self, session_id: &str, status: ChatStatus, detail: Option<String>);
     async fn delta(&self, session_id: &str, message_id: &str, delta: &str);
+    /// Model reasoning streamed separately from the answer text.
+    async fn reasoning_delta(&self, _session_id: &str, _message_id: &str, _delta: &str) {}
     async fn message(&self, session_id: &str, message: &MessageRecord);
     async fn tool_run(&self, session_id: &str, run: &ToolRunRecord);
     async fn approval(&self, session_id: &str, approval: &ApprovalRecord);
@@ -539,6 +541,7 @@ impl AgentRuntime {
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
+            reasoning: None,
             created_at: now_ms(),
         };
         db.append_message(&user_msg)?;
@@ -603,7 +606,9 @@ impl AgentRuntime {
                 tools: tools.clone(),
                 system: Some(system.clone()),
                 temperature: None,
-                max_tokens: None,
+                // Without it OpenAI-compatible endpoints apply their own
+                // (often small) default, which cuts off large file writes.
+                max_tokens: model_info.as_ref().and_then(|m| m.capabilities.max_output_tokens),
             };
 
             sink.status(session_id, ChatStatus::Thinking, None).await;
@@ -621,6 +626,8 @@ impl AgentRuntime {
             sink.status(session_id, ChatStatus::Streaming, None).await;
             let assistant_id = new_id();
             let mut text = String::new();
+            let mut reasoning = String::new();
+            let mut stop_reason: Option<StopReason> = None;
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             let mut usage = TokenUsage::default();
             let mut cancelled = false;
@@ -632,6 +639,10 @@ impl AgentRuntime {
                             Some(StreamEvent::TextDelta(t)) => {
                                 text.push_str(&t);
                                 sink.delta(session_id, &assistant_id, &t).await;
+                            }
+                            Some(StreamEvent::ReasoningDelta(t)) => {
+                                reasoning.push_str(&t);
+                                sink.reasoning_delta(session_id, &assistant_id, &t).await;
                             }
                             Some(StreamEvent::ToolCallDelta { index, id, name, arguments_delta }) => {
                                 while tool_calls.len() <= index {
@@ -649,7 +660,10 @@ impl AgentRuntime {
                                 tool_calls[index] = ToolCall { id, name, arguments };
                             }
                             Some(StreamEvent::Usage(u)) => usage = u,
-                            Some(StreamEvent::Done { .. }) => break,
+                            Some(StreamEvent::Done { stop_reason: r }) => {
+                                stop_reason = r;
+                                break;
+                            }
                             None => break,
                         }
                     }
@@ -685,6 +699,7 @@ impl AgentRuntime {
                     tool_calls: tool_calls.clone(),
                     tool_call_id: None,
                     tool_name: None,
+                    reasoning: (!reasoning.is_empty()).then(|| reasoning.clone()),
                     created_at: now_ms(),
                 };
                 db.append_message(&assistant_msg)?;
@@ -734,7 +749,7 @@ impl AgentRuntime {
                     match self
                         .process_call(
                             session_id, call, profile, read_only, &tool_ctx, &policy, &cancel,
-                            &sink, &db, &assistant_id,
+                            &sink, &db, &assistant_id, stop_reason == Some(StopReason::MaxTokens),
                         )
                         .await
                     {
@@ -751,6 +766,7 @@ impl AgentRuntime {
                     tool_calls: vec![],
                     tool_call_id: Some(call.id.clone()),
                     tool_name: Some(call.name.clone()),
+                    reasoning: None,
                     created_at: now_ms(),
                 };
                 let key = format!("{}\u{0}{}", call.name, call.arguments);
@@ -812,6 +828,7 @@ impl AgentRuntime {
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
+            reasoning: None,
             created_at: now_ms(),
         };
         db.append_message(&msg)?;
@@ -836,10 +853,17 @@ impl AgentRuntime {
         sink: &Arc<dyn EventSink>,
         db: &Arc<Db>,
         assistant_id: &str,
+        output_truncated: bool,
     ) -> Result<String> {
-        let args: Value = serde_json::from_str(&call.arguments)
-            .with_context(|| format!("parsing arguments of tool {}", call.name))
-            .unwrap_or_else(|e| json!({"_parse_error": format!("{e:#}"), "_raw": call.arguments}));
+        // Some providers send "" for a call without arguments.
+        let raw = if call.arguments.trim().is_empty() { "{}" } else { call.arguments.as_str() };
+        let parsed = serde_json::from_str::<Value>(raw);
+        let args = parsed
+            .as_ref()
+            .ok()
+            .filter(|v| v.is_object())
+            .cloned()
+            .unwrap_or_else(|| json!({"_raw": call.arguments}));
 
         let run = ToolRunRecord {
             id: new_id(),
@@ -856,6 +880,13 @@ impl AgentRuntime {
         };
         db.insert_tool_run(&run)?;
         sink.tool_run(session_id, &run).await;
+
+        if args.get("_raw").is_some() {
+            let msg = invalid_arguments_message(&call.name, parsed.err(), output_truncated);
+            db.update_tool_run(&run.id, ToolRunStatus::Error, None, Some(&msg))?;
+            emit_tool_update(sink, session_id, &run.id, ToolRunStatus::Error, db).await;
+            return Ok(msg);
+        }
 
         // Agent mode + profile allowlist are enforced again at execution
         // time (the model may call tools that were not offered to it).
@@ -1012,6 +1043,7 @@ fn to_chat_message(m: MessageRecord) -> ChatMessage {
         tool_calls: m.tool_calls,
         tool_call_id: m.tool_call_id,
         tool_name: m.tool_name,
+        reasoning: m.reasoning,
     }
 }
 
@@ -1034,6 +1066,21 @@ async fn emit_tool_update(
         run.status = status;
         sink.tool_run(session_id, &run).await;
     }
+}
+
+/// Tool-result text for a call whose arguments are not a JSON object.
+/// Output cut off by the token limit is the usual cause for large writes,
+/// so say so instead of reporting a confusing "missing argument".
+fn invalid_arguments_message(tool: &str, err: Option<serde_json::Error>, output_truncated: bool) -> String {
+    let detail = err.map(|e| format!(" ({e})")).unwrap_or_default();
+    let mut msg = format!("Error: the arguments for `{tool}` are not a valid JSON object{detail}.");
+    if output_truncated {
+        msg.push_str(
+            " Your response hit the output token limit, so the arguments were cut off. \
+             Split large content: write a smaller file first, then add the rest with further fs_edit or fs_write calls.",
+        );
+    }
+    msg
 }
 
 fn estimate_cost(model: &Option<ModelInfo>, usage: TokenUsage) -> Option<f64> {
@@ -1355,6 +1402,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn invalid_arguments_explain_output_cut_off() {
+        let err = serde_json::from_str::<Value>("{\"path\":\"a.txt\",\"content\":\"abc").err();
+        let msg = invalid_arguments_message("fs_write", err, true);
+        assert!(msg.starts_with("Error:"), "counts as a failure: {msg}");
+        assert!(msg.contains("output token limit"));
+        let msg = invalid_arguments_message("fs_write", None, false);
+        assert!(!msg.contains("token limit"));
     }
 
     struct PanickingSink {

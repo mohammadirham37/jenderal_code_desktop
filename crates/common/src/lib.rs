@@ -255,6 +255,10 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// Model reasoning ("thinking") for assistant messages, when the
+    /// provider streams it separately (`reasoning_content`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 impl ChatMessage {
@@ -265,6 +269,7 @@ impl ChatMessage {
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
+            reasoning: None,
         }
     }
 }
@@ -282,6 +287,9 @@ pub struct MessageRecord {
     pub tool_call_id: Option<String>,
     #[serde(default)]
     pub tool_name: Option<String>,
+    /// Model reasoning streamed separately from the answer.
+    #[serde(default)]
+    pub reasoning: Option<String>,
     pub created_at: i64,
 }
 
@@ -402,6 +410,8 @@ pub struct ToolSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StreamEvent {
     TextDelta(String),
+    /// Model reasoning ("thinking") streamed separately from the answer.
+    ReasoningDelta(String),
     /// Deltas for a tool call, accumulated by `index` in the runtime.
     ToolCallDelta {
         index: usize,

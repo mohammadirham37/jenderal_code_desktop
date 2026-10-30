@@ -64,8 +64,8 @@ impl OpenAiProvider {
                 Role::System => out.push(json!({"role": "system", "content": m.content})),
                 Role::User => out.push(json!({"role": "user", "content": m.content})),
                 Role::Assistant => {
-                    if m.tool_calls.is_empty() {
-                        out.push(json!({"role": "assistant", "content": m.content}));
+                    let mut msg = if m.tool_calls.is_empty() {
+                        json!({"role": "assistant", "content": m.content})
                     } else {
                         let calls: Vec<Value> = m
                             .tool_calls
@@ -83,12 +83,19 @@ impl OpenAiProvider {
                         } else {
                             json!(m.content)
                         };
-                        out.push(json!({
+                        json!({
                             "role": "assistant",
                             "content": content,
                             "tool_calls": calls
-                        }));
+                        })
+                    };
+                    // Interleaved-thinking models (GLM, DeepSeek, Kimi) read
+                    // their earlier reasoning back between tool calls. The
+                    // runtime only keeps it for the turn in progress.
+                    if let Some(r) = m.reasoning.as_deref().filter(|r| !r.is_empty()) {
+                        msg["reasoning_content"] = json!(r);
                     }
+                    out.push(msg);
                 }
                 Role::Tool => {
                     out.push(json!({
@@ -265,6 +272,12 @@ impl SseState {
         }
         if let Some(choice) = v["choices"].get(0) {
             if let Some(delta) = choice.get("delta") {
+                // `reasoning_content` (DeepSeek, GLM, Qwen, vLLM) or
+                // `reasoning` (OpenRouter, Ollama).
+                let reasoning = delta["reasoning_content"].as_str().or_else(|| delta["reasoning"].as_str());
+                if let Some(text) = reasoning.filter(|t| !t.is_empty()) {
+                    ok &= send(tx, StreamEvent::ReasoningDelta(text.to_string()));
+                }
                 if let Some(text) = delta["content"].as_str() {
                     if !text.is_empty() {
                         ok &= send(tx, StreamEvent::TextDelta(text.to_string()));
@@ -376,6 +389,7 @@ mod tests {
                     }],
                     tool_call_id: None,
                     tool_name: None,
+                    reasoning: None,
                 },
                 ChatMessage {
                     role: Role::Tool,
@@ -383,6 +397,7 @@ mod tests {
                     tool_calls: vec![],
                     tool_call_id: Some("call_1".into()),
                     tool_name: Some("fs_read".into()),
+                    reasoning: None,
                 },
             ],
             tools: vec![ToolSpec {
@@ -408,6 +423,35 @@ mod tests {
         let tools = OpenAiProvider::convert_tools(&sample_req());
         assert_eq!(tools[0]["type"], "function");
         assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn assistant_reasoning_is_sent_back_as_reasoning_content() {
+        let mut req = sample_req();
+        req.messages[1].reasoning = Some("look at a.txt first".into());
+        let converted = OpenAiProvider::convert_messages(&req);
+        assert_eq!(converted[2]["reasoning_content"], "look at a.txt first");
+        assert!(OpenAiProvider::convert_messages(&sample_req())[2].get("reasoning_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn reasoning_deltas_are_streamed_separately() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think \"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"more\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let events = collect(vec![body.as_bytes().to_vec()]).await;
+        let reasoning: String = events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::ReasoningDelta(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reasoning, "think more");
+        assert!(events.iter().any(|e| matches!(e, StreamEvent::TextDelta(t) if t == "answer")));
     }
 
     #[test]
