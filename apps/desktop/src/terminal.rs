@@ -38,6 +38,17 @@ fn lock(map: &HandleMap) -> std::sync::MutexGuard<'_, HashMap<String, PtyHandle>
     map.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The user's login shell (Unix).
+pub(crate) fn user_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(target_os = "macos") {
+            "/bin/zsh".to_string()
+        } else {
+            "/bin/bash".to_string()
+        }
+    })
+}
+
 fn default_shell() -> CommandBuilder {
     if cfg!(windows) {
         if let Some(pwsh) = which("pwsh.exe").or_else(|| which("powershell.exe")) {
@@ -45,21 +56,36 @@ fn default_shell() -> CommandBuilder {
         }
         return CommandBuilder::new("cmd.exe");
     }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/bin/zsh".to_string()
-        } else {
-            "/bin/bash".to_string()
-        }
-    });
-    let mut cmd = CommandBuilder::new(&shell);
+    let mut cmd = CommandBuilder::new(user_shell());
     // Login + interactive, like Terminal.app: loads the user's profile.
     cmd.arg("-l");
     cmd.arg("-i");
     cmd
 }
 
-fn which(prog: &str) -> Option<String> {
+/// The process for a terminal: an interactive login shell, or (for agent
+/// tabs) `command` run through that shell so the user's PATH and aliases
+/// apply. Apps started from Finder do not inherit the terminal's PATH.
+fn build_command(command: Option<&str>) -> CommandBuilder {
+    let Some(command) = command.map(str::trim).filter(|c| !c.is_empty()) else {
+        return default_shell();
+    };
+    if cfg!(windows) {
+        if let Some(pwsh) = which("pwsh.exe").or_else(|| which("powershell.exe")) {
+            let mut cmd = CommandBuilder::new(pwsh);
+            cmd.args(["-NoLogo", "-Command", command]);
+            return cmd;
+        }
+        let mut cmd = CommandBuilder::new("cmd.exe");
+        cmd.args(["/C", command]);
+        return cmd;
+    }
+    let mut cmd = default_shell();
+    cmd.args(["-c", command]);
+    cmd
+}
+
+pub(crate) fn which(prog: &str) -> Option<String> {
     let path = std::env::var("PATH").unwrap_or_default();
     for dir in path.split(if cfg!(windows) { ';' } else { ':' }) {
         let candidate = Path::new(dir).join(prog);
@@ -71,8 +97,17 @@ fn which(prog: &str) -> Option<String> {
 }
 
 impl TerminalManager {
-    /// Spawn a new interactive terminal. `id` is chosen by the frontend.
-    pub fn create(&self, app: &AppHandle, id: &str, cwd: &Path, cols: u16, rows: u16) -> Result<()> {
+    /// Spawn a new terminal. `id` is chosen by the frontend; `command`, when
+    /// set, runs instead of an interactive shell (agent CLI tabs).
+    pub fn create(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        cwd: &Path,
+        cols: u16,
+        rows: u16,
+        command: Option<&str>,
+    ) -> Result<()> {
         {
             let mut handles = lock(&self.handles);
             if let Some(h) = handles.get_mut(id) {
@@ -97,7 +132,7 @@ impl TerminalManager {
             })
             .context("opening pty")?;
 
-        let mut cmd = default_shell();
+        let mut cmd = build_command(command);
         cmd.cwd(cwd);
         // Apps launched from Finder/launchd inherit an environment WITHOUT
         // TERM. Without a terminal description the shell cannot move the
@@ -113,7 +148,7 @@ impl TerminalManager {
         for key in jcode_tool_terminal::scrubbed_env_keys() {
             cmd.env_remove(key);
         }
-        let child = pair.slave.spawn_command(cmd).context("spawning shell")?;
+        let child = pair.slave.spawn_command(cmd).context("spawning terminal process")?;
         drop(pair.slave); // close the slave end in the parent so EOF works
 
         let mut reader = pair
@@ -253,5 +288,37 @@ impl TerminalManager {
 
     pub fn list(&self) -> Vec<String> {
         lock(&self.handles).keys().cloned().collect()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn argv(cmd: &CommandBuilder) -> Vec<String> {
+        cmd.get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn plain_terminal_is_interactive_login_shell() {
+        let a = argv(&build_command(None));
+        assert_eq!(a[0], user_shell());
+        assert_eq!(&a[1..], ["-l", "-i"]);
+    }
+
+    #[test]
+    fn agent_command_runs_through_login_shell() {
+        let a = argv(&build_command(Some("goose session")));
+        assert_eq!(a[0], user_shell());
+        assert_eq!(&a[1..], ["-l", "-i", "-c", "goose session"]);
+    }
+
+    #[test]
+    fn blank_command_is_a_plain_shell() {
+        let a = argv(&build_command(Some("   ")));
+        assert_eq!(&a[1..], ["-l", "-i"]);
     }
 }

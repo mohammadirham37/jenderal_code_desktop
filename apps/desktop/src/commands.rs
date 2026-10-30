@@ -938,12 +938,20 @@ pub async fn terminal_create(
     id: String,
     cols: Option<u16>,
     rows: Option<u16>,
+    command: Option<String>,
 ) -> CmdResult<()> {
     let cwd = state.active_root().unwrap_or_else(|_| PathBuf::from("."));
     let terminals = state.terminals.clone();
     blocking(move || {
         terminals
-            .create(&app, &id, &cwd, cols.unwrap_or(80), rows.unwrap_or(24))
+            .create(
+                &app,
+                &id,
+                &cwd,
+                cols.unwrap_or(80),
+                rows.unwrap_or(24),
+                command.as_deref(),
+            )
             .map_err(err)
     })
     .await
