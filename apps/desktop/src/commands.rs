@@ -984,6 +984,11 @@ pub fn terminal_list(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     Ok(state.terminals.list())
 }
 
+#[tauri::command]
+pub async fn detect_agent_clis(commands: Vec<String>) -> CmdResult<Vec<bool>> {
+    blocking(move || Ok(crate::agent_detect::detect(&commands))).await
+}
+
 // ---------------------------------------------------------------------------
 // External CLI agents (experimental)
 // ---------------------------------------------------------------------------
