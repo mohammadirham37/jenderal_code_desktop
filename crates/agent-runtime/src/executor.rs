@@ -449,6 +449,23 @@ fn truncate_for_model(s: &str) -> String {
     )
 }
 
+/// Like [`truncate_for_model`] but keeps the start and the (more useful) end
+/// of command output: build errors and test summaries come last.
+fn truncate_middle_for_model(s: &str) -> String {
+    if s.len() <= MAX_RESULT_FOR_MODEL {
+        return s.to_string();
+    }
+    let mut head = MAX_RESULT_FOR_MODEL / 4;
+    while !s.is_char_boundary(head) {
+        head -= 1;
+    }
+    let mut tail = s.len() - (MAX_RESULT_FOR_MODEL - head);
+    while !s.is_char_boundary(tail) {
+        tail += 1;
+    }
+    format!("{}\n\n... [{} bytes omitted] ...\n\n{}", &s[..head], tail - head, &s[tail..])
+}
+
 /// Outcome of a successful tool execution.
 pub struct ToolOutcome {
     /// Short summary for the UI tool-run card.
@@ -511,11 +528,15 @@ async fn run_terminal(args: &Value, ws: &Workspace, cancel: &CancelToken) -> Res
         "$ {command}\n{output}\n[exit: {} | {}{}]",
         exit_line,
         format_duration(res.duration_ms),
-        if res.truncated { " | output truncated" } else { "" }
+        if res.truncated {
+            " | long output: start and end kept, middle omitted; filter it (grep, tail) to see a specific part"
+        } else {
+            ""
+        }
     );
     Ok(ToolOutcome {
         summary,
-        result_for_model: truncate_for_model(&body),
+        result_for_model: truncate_middle_for_model(&body),
         diff: None,
     })
 }
@@ -1098,6 +1119,16 @@ mod tests {
         // Text that is really in the file is never rewritten.
         let (old, _) = strip_copied_line_numbers("1\tid", "1\tid".into(), String::new());
         assert_eq!(old, "1\tid");
+    }
+
+    #[test]
+    fn long_command_output_keeps_start_and_end() {
+        let body = format!("START{}END", "é".repeat(MAX_RESULT_FOR_MODEL));
+        let out = truncate_middle_for_model(&body);
+        assert!(out.len() < MAX_RESULT_FOR_MODEL + 100);
+        assert!(out.starts_with("START") && out.ends_with("END"));
+        assert!(out.contains("bytes omitted"));
+        assert_eq!(truncate_middle_for_model("short"), "short");
     }
 
     #[tokio::test]

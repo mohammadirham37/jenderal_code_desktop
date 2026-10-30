@@ -182,8 +182,7 @@ pub async fn run_exec(spec: &ExecSpec, cancel: &CancelToken) -> Result<ExecResul
     let mut stderr = child.stderr.take().expect("piped stderr");
     let cap = spec.max_output_bytes;
     let mut pump = tokio::spawn(async move {
-        let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
-        let mut truncated = false;
+        let mut buf = HeadTail::new(cap);
         let mut out_open = true;
         let mut err_open = true;
         let mut out_chunk = vec![0u8; 8 * 1024];
@@ -193,19 +192,19 @@ pub async fn run_exec(spec: &ExecSpec, cancel: &CancelToken) -> Result<ExecResul
                 n = stdout.read(&mut out_chunk), if out_open => match n {
                     Ok(0) | Err(_) => out_open = false,
                     Ok(n) => {
-                        append_capped(&mut buf, &out_chunk[..n], cap, &mut truncated);
+                        buf.push(&out_chunk[..n]);
                     }
                 },
                 n = stderr.read(&mut err_chunk), if err_open => match n {
                     Ok(0) | Err(_) => err_open = false,
                     Ok(n) => {
-                        append_capped(&mut buf, &err_chunk[..n], cap, &mut truncated);
+                        buf.push(&err_chunk[..n]);
                     }
                 },
                 else => break,
             }
         }
-        (buf, truncated)
+        buf.finish()
     });
 
     // Wait with timeout + cancellation.
@@ -274,15 +273,54 @@ pub async fn run_exec(spec: &ExecSpec, cancel: &CancelToken) -> Result<ExecResul
     })
 }
 
-fn append_capped(buf: &mut Vec<u8>, chunk: &[u8], cap: usize, truncated: &mut bool) {
-    if buf.len() < cap {
-        let room = cap - buf.len();
-        buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
-        if chunk.len() > room {
-            *truncated = true;
+/// Output capture that keeps the first quarter and the last three quarters
+/// of `cap` bytes: errors and test summaries are usually at the end.
+struct HeadTail {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    head_cap: usize,
+    tail_cap: usize,
+    total: usize,
+}
+
+impl HeadTail {
+    fn new(cap: usize) -> Self {
+        let head_cap = cap / 4;
+        Self { head: Vec::new(), tail: Vec::new(), head_cap, tail_cap: cap - head_cap, total: 0 }
+    }
+
+    fn push(&mut self, mut chunk: &[u8]) {
+        self.total += chunk.len();
+        if self.head.len() < self.head_cap {
+            let n = chunk.len().min(self.head_cap - self.head.len());
+            self.head.extend_from_slice(&chunk[..n]);
+            chunk = &chunk[n..];
         }
-    } else {
-        *truncated = true;
+        self.tail.extend_from_slice(chunk);
+        // Trim in batches so pushing stays amortized O(1).
+        if self.tail.len() > self.tail_cap * 2 {
+            let excess = self.tail.len() - self.tail_cap;
+            self.tail.drain(..excess);
+        }
+    }
+
+    /// `(output, truncated)`.
+    fn finish(mut self) -> (Vec<u8>, bool) {
+        if self.tail.len() > self.tail_cap {
+            let excess = self.tail.len() - self.tail_cap;
+            self.tail.drain(..excess);
+        }
+        let kept = self.head.len() + self.tail.len();
+        if kept == self.total {
+            self.head.extend_from_slice(&self.tail);
+            return (self.head, false);
+        }
+        let mut out = self.head;
+        out.extend_from_slice(
+            format!("\n\n[jenderalcode] ... {} bytes of output omitted ...\n\n", self.total - kept).as_bytes(),
+        );
+        out.extend_from_slice(&self.tail);
+        (out, true)
     }
 }
 
@@ -360,6 +398,18 @@ mod tests {
         let res = run_exec(&spec, &CancelToken::new()).await.unwrap();
         assert!(res.truncated);
         assert!(res.output.len() <= 8 * 1024);
+        // Both ends survive: the start and the final lines.
+        assert!(res.output.starts_with("1\n2\n"));
+        assert!(res.output.trim_end().ends_with("100000"), "{}", &res.output[res.output.len() - 40..]);
+        assert!(res.output.contains("bytes of output omitted"));
+    }
+
+    #[test]
+    fn head_tail_keeps_everything_under_the_cap() {
+        let mut h = HeadTail::new(100);
+        h.push(b"hello ");
+        h.push(b"world");
+        assert_eq!(h.finish(), (b"hello world".to_vec(), false));
     }
 
     #[cfg(unix)]
