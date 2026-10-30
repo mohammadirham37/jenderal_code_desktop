@@ -4,6 +4,7 @@
 pub mod context;
 pub mod executor;
 pub mod retry;
+pub mod subagent;
 pub mod todo;
 pub mod web;
 
@@ -112,6 +113,7 @@ Do not attempt to modify anything — write access is disabled."
             allowed_tools: Some(vec![
                 "fs_read".into(), "fs_list".into(), "fs_search".into(), "glob_files".into(),
                 "git_status".into(), "git_diff".into(), "git_log".into(), "todo_write".into(), "web_fetch".into(),
+                "task".into(),
             ]),
             policy_mode: PolicyMode::Safe,
             provider_id: None,
@@ -147,7 +149,7 @@ Write access is disabled — investigate only. Report findings as a prioritized 
             allowed_tools: Some(vec![
                 "fs_read".into(), "fs_list".into(), "fs_search".into(), "glob_files".into(),
                 "terminal_run".into(), "git_status".into(), "git_diff".into(), "git_log".into(),
-                "todo_write".into(), "web_fetch".into(),
+                "todo_write".into(), "web_fetch".into(), "task".into(),
             ]),
             policy_mode: PolicyMode::Safe,
             provider_id: None,
@@ -810,9 +812,17 @@ impl AgentRuntime {
             // --------------------------------------------------------------
             sink.status(session_id, ChatStatus::RunningTool, None).await;
             let output_truncated = stop_reason == Some(StopReason::MaxTokens);
+            let env = subagent::TurnEnv {
+                provider: &provider,
+                provider_cfg,
+                model_name,
+                model_info: &model_info,
+                system: &system,
+                budget: history_budget,
+            };
             let run_one = |call: &ToolCall| {
-                let (tool_ctx, policy, cancel, sink, db, assistant_id) =
-                    (&tool_ctx, &policy, &cancel, &sink, &db, &assistant_id);
+                let (tool_ctx, policy, cancel, sink, db, assistant_id, env) =
+                    (&tool_ctx, &policy, &cancel, &sink, &db, &assistant_id, &env);
                 let call = call.clone();
                 async move {
                     if cancel.is_cancelled() {
@@ -821,7 +831,7 @@ impl AgentRuntime {
                     match self
                         .process_call(
                             session_id, &call, profile, read_only, tool_ctx, policy, cancel, sink, db,
-                            assistant_id, output_truncated,
+                            assistant_id, output_truncated, env,
                         )
                         .await
                     {
@@ -991,6 +1001,7 @@ impl AgentRuntime {
         db: &Arc<Db>,
         assistant_id: &str,
         output_truncated: bool,
+        env: &subagent::TurnEnv<'_>,
     ) -> Result<String> {
         // Some providers send "" for a call without arguments.
         let raw = if call.arguments.trim().is_empty() { "{}" } else { call.arguments.as_str() };
@@ -1040,6 +1051,10 @@ impl AgentRuntime {
             db.update_tool_run(&run.id, ToolRunStatus::Error, None, Some(&msg))?;
             emit_tool_update(sink, session_id, &run.id, ToolRunStatus::Error, db).await;
             return Ok(msg);
+        }
+
+        if call.name == "task" {
+            return self.run_task(session_id, &args, &run.id, env, tool_ctx, policy, cancel, sink, db).await;
         }
 
         let action = match executor::classify(&call.name, &args, tool_ctx) {
@@ -1191,7 +1206,7 @@ fn default_build_profile() -> AgentProfile {
         .expect("build profile exists")
 }
 
-async fn emit_tool_update(
+pub(crate) async fn emit_tool_update(
     sink: &Arc<dyn EventSink>,
     session_id: &str,
     run_id: &str,
@@ -1212,7 +1227,7 @@ state), Commands and results (builds, tests, errors), Open issues and next steps
 paths, identifiers, commands and error messages exact. Do not invent anything that is not in the transcript.";
 
 /// Persist a usage record and report it to the UI.
-async fn record_usage(
+pub(crate) async fn record_usage(
     db: &Arc<Db>,
     sink: &Arc<dyn EventSink>,
     session_id: &str,

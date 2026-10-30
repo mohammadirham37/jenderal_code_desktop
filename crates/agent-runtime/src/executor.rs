@@ -209,6 +209,19 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
             &["url"],
         ),
         spec(
+            "task",
+            "Delegate a self-contained research or exploration task to a sub-agent with read-only tools (read, \
+             list, search, glob, git). It works in its own context and returns only a final report, so use it to \
+             explore a large area of code or answer a question that needs many reads without filling your own \
+             context. Put several task calls in one response to run them in parallel. The prompt must say exactly \
+             what to find and what to report; the sub-agent cannot ask you anything.",
+            json!({
+                "description": {"type": "string", "description": "Short label, 3-6 words"},
+                "prompt": {"type": "string", "description": "The full task for the sub-agent"}
+            }),
+            &["description", "prompt"],
+        ),
+        spec(
             "todo_write",
             "Create or update your task list for multi-step work. Send the complete list every time. Use it for \
              tasks with 3 or more steps: plan the steps first, keep exactly one item in_progress, and mark items \
@@ -314,7 +327,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
 pub fn is_parallel_safe(name: &str) -> bool {
     matches!(
         name,
-        "fs_read" | "fs_list" | "fs_search" | "glob_files" | "git_status" | "git_diff" | "git_log" | "todo_write"
+        "fs_read" | "fs_list" | "fs_search" | "glob_files" | "git_status" | "git_diff" | "git_log" | "todo_write" | "task"
     )
 }
 
@@ -415,7 +428,7 @@ pub fn classify(name: &str, args: &Value, ctx: &ToolContext) -> Result<Action> {
             }
         }
         // `todo_write` only echoes its arguments: classify it as a plain read.
-        "fs_list" | "glob_files" | "fs_search" | "git_status" | "git_diff" | "git_log" | "todo_write" => {
+        "fs_list" | "glob_files" | "fs_search" | "git_status" | "git_diff" | "git_log" | "todo_write" | "task" => {
             // Read-only tools: reads stay inside the workspace (enforced at
             // execution by Workspace::resolve).
             Ok(Action::ReadFile {

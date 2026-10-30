@@ -67,6 +67,8 @@ Use `fs_write` only for new files or full rewrites; split very large files into 
 in_progress, and mark items completed as you finish them.
 - `fs_search` supports `case_insensitive`, `context_lines`, and `path`; prefer it over `grep` in the terminal.
 - Use `web_fetch` for documentation or facts that are not in the workspace instead of guessing.
+- Use `task` to hand a broad exploration or research question to a read-only sub-agent (several in one \
+response run in parallel). Give it a complete prompt; you only get its final report back.
 - `terminal_run` is non-interactive and its output is capped: pass flags that avoid prompts and pagers \
 (e.g. `--yes`, `--no-pager`) and narrow output with targeted commands.
 

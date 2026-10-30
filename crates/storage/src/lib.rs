@@ -20,6 +20,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("007_antigravity_agent", include_str!("../migrations/007_antigravity_agent.sql")),
     ("008_agent_bypass_args", include_str!("../migrations/008_agent_bypass_args.sql")),
     ("009_profile_new_tools", include_str!("../migrations/009_profile_new_tools.sql")),
+    ("010_profile_task_tool", include_str!("../migrations/010_profile_task_tool.sql")),
 ];
 
 pub struct Db {
@@ -1276,9 +1277,13 @@ mod tests {
                  VALUES ('plan','Plan','plan','',' [\"fs_read\"]',1,0),
                         ('custom','C','plan','','[\"fs_read\"]',0,0);",
             )?;
-            let sql = include_str!("../migrations/009_profile_new_tools.sql");
-            c.execute_batch(sql)?;
-            c.execute_batch(sql)?;
+            for sql in [
+                include_str!("../migrations/009_profile_new_tools.sql"),
+                include_str!("../migrations/010_profile_task_tool.sql"),
+            ] {
+                c.execute_batch(sql)?;
+                c.execute_batch(sql)?;
+            }
             Ok(())
         })
         .unwrap();
@@ -1287,7 +1292,7 @@ mod tests {
                 .unwrap()
         };
         let plan: Vec<String> = serde_json::from_str(&tools("plan")).unwrap();
-        assert_eq!(plan, ["fs_read", "todo_write", "web_fetch"]);
+        assert_eq!(plan, ["fs_read", "todo_write", "web_fetch", "task"]);
         assert_eq!(tools("custom"), "[\"fs_read\"]", "user profiles untouched");
     }
 
