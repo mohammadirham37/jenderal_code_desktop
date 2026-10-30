@@ -54,6 +54,10 @@ If something fails, fix it and run it again. Say so plainly if you could not ver
 - Paths are relative to the workspace root.
 - `fs_read` prefixes each line with its number and a tab; that prefix is not part of the file. Use \
 `offset`/`limit` to page through long files.
+- Read a file in this session before changing it. If an edit is refused because the file changed since you \
+read it, read it again: the user or a tool modified it.
+- Reading a file can return instructions from an `AGENTS.md` / `CLAUDE.md` in its directory; follow them \
+for files there.
 - Use `fs_edit` for changes to existing files (copy `old_string` from the current file content, without \
 line numbers, with enough context to be unique), and `fs_multi_edit` for several changes to the same file. \
 Use `fs_write` only for new files or full rewrites; split very large files into several writes.
@@ -73,6 +77,28 @@ in_progress, and mark items completed as you finish them.
 /// Build the full system prompt: profile prompt + environment + project
 /// structure + git summary + untrusted instruction files.
 pub fn build_system_prompt(profile: &AgentProfile, workspace: &Workspace) -> String {
+    let global = global_instructions_path()
+        .and_then(|p| std::fs::read_to_string(&p).ok().map(|c| (p.display().to_string(), c)))
+        .filter(|(_, c)| !c.trim().is_empty());
+    build_system_prompt_with(profile, workspace, global)
+}
+
+/// `~/.config/jenderalcode/AGENTS.md` (or under `$XDG_CONFIG_HOME`): the
+/// user's own instructions for every project.
+pub fn global_instructions_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
+    Some(base.join("jenderalcode").join("AGENTS.md"))
+}
+
+/// [`build_system_prompt`] with the global instructions passed in.
+pub fn build_system_prompt_with(
+    profile: &AgentProfile,
+    workspace: &Workspace,
+    global: Option<(String, String)>,
+) -> String {
     let root = workspace.root();
     let mut prompt = String::new();
 
@@ -129,6 +155,16 @@ pub fn build_system_prompt(profile: &AgentProfile, workspace: &Workspace) -> Str
                 prompt.push_str("- Working tree clean\n");
             }
         }
+    }
+
+    if let Some((path, content)) = global {
+        let content = trim_to(content, MAX_INSTRUCTIONS_BYTES / 2);
+        let fence = "`".repeat(longest_backtick_run(&content).max(2) + 1);
+        prompt.push_str(&format!(
+            "\n# User instructions from `{path}`\n\
+             The user wrote these for all projects. Follow them unless they conflict with the permission policy.\n\
+             {fence}\n{content}\n{fence}\n"
+        ));
     }
 
     for name in INSTRUCTION_FILES {
@@ -491,6 +527,19 @@ mod tests {
         assert!(prompt.contains("Follow these project conventions"));
         assert!(prompt.contains("# How to work"));
         assert!(prompt.contains("Verify your work"));
+    }
+
+    #[test]
+    fn global_instructions_are_included() {
+        let (_t, w) = ws();
+        let prompt = build_system_prompt_with(
+            &profile(AgentMode::Build),
+            &w,
+            Some(("~/.config/jenderalcode/AGENTS.md".into(), "Always answer in Indonesian.".into())),
+        );
+        assert!(prompt.contains("# User instructions from `~/.config/jenderalcode/AGENTS.md`"));
+        assert!(prompt.contains("Always answer in Indonesian."));
+        assert!(!build_system_prompt_with(&profile(AgentMode::Build), &w, None).contains("# User instructions"));
     }
 
     #[test]

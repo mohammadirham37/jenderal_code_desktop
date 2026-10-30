@@ -197,6 +197,8 @@ struct SessionHandle {
     cancel: CancelToken,
     policy: Arc<Mutex<PolicyEngine>>,
     busy: bool,
+    /// Files the agent has read, kept across turns.
+    files: executor::SharedFileTracker,
 }
 
 /// A pending approval waiting for the user's decision.
@@ -266,6 +268,7 @@ impl AgentRuntime {
             cancel: CancelToken::new(),
             policy: Arc::new(Mutex::new(PolicyEngine::new(mode, &canonical))),
             busy: false,
+            files: Default::default(),
         });
         let mut p = entry.policy.lock().unwrap();
         let grants: Vec<Grant> = p.grants().iter().copied().collect();
@@ -432,6 +435,7 @@ impl AgentRuntime {
                         &canonical,
                     ))),
                     busy: false,
+                    files: Default::default(),
                 });
             // Keep an existing engine as-is: policy changes made at runtime
             // (ensure_session_policy / set_policy_mode / session grants)
@@ -504,7 +508,7 @@ impl AgentRuntime {
     ) -> Result<()> {
         let sink = self.events.clone();
         let db = self.db.clone();
-        let (cancel, policy) = {
+        let (cancel, policy, files) = {
             let sessions = self.sessions.lock().unwrap();
             let h = sessions.get(session_id);
             (
@@ -512,6 +516,7 @@ impl AgentRuntime {
                 h.map(|h| h.policy.clone()).unwrap_or_else(|| {
                     Arc::new(Mutex::new(PolicyEngine::new(profile.policy_mode, ws.root())))
                 }),
+                h.map(|h| h.files.clone()).unwrap_or_default(),
             )
         };
 
@@ -573,7 +578,7 @@ impl AgentRuntime {
                 .context("building system prompt")?
         };
         let checkpoints = CheckpointStore::new(&self.checkpoint_base).ok();
-        let tool_ctx = executor::ToolContext::new(session_id, ws.clone(), checkpoints);
+        let tool_ctx = executor::ToolContext::new(session_id, ws.clone(), checkpoints).with_files(files);
         let settings = db.get_settings().unwrap_or_default();
         let max_iterations = settings.max_iterations.max(1);
 
