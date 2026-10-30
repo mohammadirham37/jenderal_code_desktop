@@ -29,6 +29,9 @@ pub struct ToolContext {
     pub checkpoints: Option<Arc<CheckpointStore>>,
     /// What the agent has read in this session (shared across turns).
     pub files: SharedFileTracker,
+    /// Language servers for diagnostics after edits, and whether missing
+    /// servers may be downloaded.
+    pub lsp: Option<(Arc<jcode_tool_lsp::LspManager>, bool)>,
 }
 
 /// Size and modification time of a file when the agent last saw it.
@@ -56,7 +59,13 @@ impl ToolContext {
             workspace,
             checkpoints: checkpoints.map(Arc::new),
             files: SharedFileTracker::default(),
+            lsp: None,
         }
+    }
+
+    pub fn with_lsp(mut self, lsp: Arc<jcode_tool_lsp::LspManager>, allow_download: bool) -> Self {
+        self.lsp = Some((lsp, allow_download));
+        self
     }
 
     /// Use the session's tracker so reads from earlier turns count.
@@ -557,9 +566,34 @@ pub async fn execute(
     let name = name.to_string();
     let args = args.clone();
     let ctx = ctx.clone();
-    tokio::task::spawn_blocking(move || execute_blocking(&name, &args, &ctx))
-        .await
-        .map_err(|e| anyhow!("tool task failed: {e}"))?
+    let outcome = {
+        let (name, args, ctx) = (name.clone(), args.clone(), ctx.clone());
+        tokio::task::spawn_blocking(move || execute_blocking(&name, &args, &ctx))
+            .await
+            .map_err(|e| anyhow!("tool task failed: {e}"))??
+    };
+    Ok(with_diagnostics(outcome, &name, &args, &ctx).await)
+}
+
+/// After a successful write or edit, append the language server's errors
+/// for the file so the model notices broken code right away.
+async fn with_diagnostics(mut outcome: ToolOutcome, name: &str, args: &Value, ctx: &ToolContext) -> ToolOutcome {
+    let Some((lsp, allow_download)) = &ctx.lsp else { return outcome };
+    if !matches!(name, "fs_write" | "fs_edit" | "fs_multi_edit") {
+        return outcome;
+    }
+    let Ok(path) = get_str(args, "path") else { return outcome };
+    let (Ok(abs), Ok(text)) = (ctx.workspace.resolve(&path), ctx.workspace.read_file(&path)) else {
+        return outcome;
+    };
+    if let Some(diags) = lsp.diagnostics(ctx.workspace.root(), &abs, &text, *allow_download).await {
+        let errors = diags.iter().filter(|d| d.severity == 1).count();
+        if let Some(report) = jcode_tool_lsp::format_errors(&path, &diags) {
+            outcome.result_for_model.push_str(&report);
+            outcome.summary.push_str(&format!(" · {errors} error(s)"));
+        }
+    }
+    outcome
 }
 
 async fn run_terminal(args: &Value, ws: &Workspace, cancel: &CancelToken) -> Result<ToolOutcome> {

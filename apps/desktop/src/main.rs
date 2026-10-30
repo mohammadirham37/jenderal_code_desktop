@@ -242,6 +242,7 @@ fn main() {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<AppState>() {
                     state.terminals.kill_all();
+                    state.runtime.shutdown();
                 }
             }
         })

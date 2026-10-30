@@ -58,6 +58,8 @@ If something fails, fix it and run it again. Say so plainly if you could not ver
 read it, read it again: the user or a tool modified it.
 - Reading a file can return instructions from an `AGENTS.md` / `CLAUDE.md` in its directory; follow them \
 for files there.
+- After a write or edit, the result may list errors from a language server. Fix errors your change \
+introduced before moving on.
 - Use `fs_edit` for changes to existing files (copy `old_string` from the current file content, without \
 line numbers, with enough context to be unique), and `fs_multi_edit` for several changes to the same file. \
 Use `fs_write` only for new files or full rewrites; split very large files into several writes.

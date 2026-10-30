@@ -239,6 +239,8 @@ pub struct AgentRuntime {
     checkpoint_base: PathBuf,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     pending: Mutex<HashMap<String, PendingApproval>>,
+    /// Language servers shared by all sessions (one per root + language).
+    lsp: Arc<jcode_tool_lsp::LspManager>,
 }
 
 impl AgentRuntime {
@@ -255,7 +257,13 @@ impl AgentRuntime {
             checkpoint_base: checkpoint_base.into(),
             sessions: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
+            lsp: Arc::new(jcode_tool_lsp::LspManager::new()),
         }
+    }
+
+    /// Stop the language servers (app exit).
+    pub fn shutdown(&self) {
+        self.lsp.shutdown();
     }
 
     /// Register (or refresh) the session's policy engine. Called when a
@@ -578,8 +586,11 @@ impl AgentRuntime {
                 .context("building system prompt")?
         };
         let checkpoints = CheckpointStore::new(&self.checkpoint_base).ok();
-        let tool_ctx = executor::ToolContext::new(session_id, ws.clone(), checkpoints).with_files(files);
         let settings = db.get_settings().unwrap_or_default();
+        let mut tool_ctx = executor::ToolContext::new(session_id, ws.clone(), checkpoints).with_files(files);
+        if settings.lsp_diagnostics {
+            tool_ctx = tool_ctx.with_lsp(self.lsp.clone(), settings.lsp_auto_download);
+        }
         let max_iterations = settings.max_iterations.max(1);
 
         // Model pricing for cost estimates + context window for the budget.

@@ -186,6 +186,10 @@ export interface AppSettings {
   editor_word_wrap: boolean;
   /** Agent CLIs for the chat column's "+" menu. */
   agent_clis: AgentCli[];
+  /** Report language-server errors to the agent after edits. */
+  lsp_diagnostics: boolean;
+  /** Download missing language servers with npx. */
+  lsp_auto_download: boolean;
 }
 
 export interface ProviderTestResult {

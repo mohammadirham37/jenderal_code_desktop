@@ -70,6 +70,8 @@ export const useApp = create<AppState>((set, get) => ({
     credential_storage: "file",
     editor_word_wrap: true,
     agent_clis: [],
+    lsp_diagnostics: true,
+    lsp_auto_download: true,
   },
   paletteOpen: false,
   ready: false,

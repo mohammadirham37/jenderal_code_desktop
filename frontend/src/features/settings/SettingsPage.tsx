@@ -268,6 +268,34 @@ export function SettingsPage() {
                 }
               />
             </Field>
+            <Field
+              label="Language-server diagnostics"
+              hint="After the agent edits a TypeScript/JavaScript, PHP, Python, Rust or Go file, errors from a language server are sent back to it so it can fix them."
+            >
+              <select
+                className={inputClass}
+                value={settings.lsp_diagnostics ? "on" : "off"}
+                onChange={(e) => void updateSettings({ lsp_diagnostics: e.target.value === "on" })}
+              >
+                <option value="on">On (recommended)</option>
+                <option value="off">Off</option>
+              </select>
+            </Field>
+            {settings.lsp_diagnostics && (
+              <Field
+                label="Missing language servers"
+                hint="Servers on your PATH are used first. Otherwise vtsls, intelephense or pyright can be downloaded and run with npx (needs Node.js); Rust and Go need rust-analyzer / gopls installed."
+              >
+                <select
+                  className={inputClass}
+                  value={settings.lsp_auto_download ? "download" : "skip"}
+                  onChange={(e) => void updateSettings({ lsp_auto_download: e.target.value === "download" })}
+                >
+                  <option value="download">Download with npx when needed</option>
+                  <option value="skip">Only use installed servers</option>
+                </select>
+              </Field>
+            )}
           </section>
 
           {/* Shortcuts */}

@@ -589,6 +589,16 @@ pub struct AppSettings {
     /// Agent CLIs for the chat column's "+" menu.
     #[serde(default = "default_agent_clis")]
     pub agent_clis: Vec<AgentCli>,
+    /// Report language-server errors to the agent after it edits a file.
+    #[serde(default = "default_true")]
+    pub lsp_diagnostics: bool,
+    /// Download missing language servers with `npx` when needed.
+    #[serde(default = "default_true")]
+    pub lsp_auto_download: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_theme() -> String {
@@ -626,6 +636,8 @@ impl Default for AppSettings {
             credential_storage: default_credential_storage(),
             editor_word_wrap: default_editor_word_wrap(),
             agent_clis: default_agent_clis(),
+            lsp_diagnostics: true,
+            lsp_auto_download: true,
         }
     }
 }

@@ -1,0 +1,12 @@
+[package]
+name = "jcode-tool-lsp"
+description = "Minimal LSP client that reports diagnostics after agent edits"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jcode-tool-terminal = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }

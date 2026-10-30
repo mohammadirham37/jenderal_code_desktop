@@ -1795,6 +1795,7 @@ dependencies = [
  "jcode-storage",
  "jcode-tool-filesystem",
  "jcode-tool-git",
+ "jcode-tool-lsp",
  "jcode-tool-terminal",
  "regex",
  "reqwest 0.12.28",
@@ -1944,6 +1945,16 @@ dependencies = [
  "chrono",
  "jcode-common",
  "serde",
+]
+
+[[package]]
+name = "jcode-tool-lsp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jcode-tool-terminal",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

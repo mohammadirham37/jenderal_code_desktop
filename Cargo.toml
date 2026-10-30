@@ -11,6 +11,7 @@ members = [
     "crates/provider-google",
     "crates/tool-filesystem",
     "crates/tool-terminal",
+    "crates/tool-lsp",
     "crates/tool-git",
     "crates/agent-cli",
     "crates/agent-runtime",
@@ -34,6 +35,7 @@ jcode-provider-anthropic = { path = "crates/provider-anthropic" }
 jcode-provider-google = { path = "crates/provider-google" }
 jcode-tool-filesystem = { path = "crates/tool-filesystem" }
 jcode-tool-terminal = { path = "crates/tool-terminal" }
+jcode-tool-lsp = { path = "crates/tool-lsp" }
 jcode-tool-git = { path = "crates/tool-git" }
 jcode-agent-cli = { path = "crates/agent-cli" }
 jcode-agent-runtime = { path = "crates/agent-runtime" }
