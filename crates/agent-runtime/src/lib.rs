@@ -3,6 +3,7 @@
 
 pub mod context;
 pub mod executor;
+pub mod retry;
 pub mod todo;
 pub mod web;
 
@@ -644,8 +645,31 @@ impl AgentRuntime {
             };
 
             sink.status(session_id, ChatStatus::Thinking, None).await;
-            let mut stream = match provider.stream(request).await {
-                Ok(s) => s,
+            let opened = retry::open_stream(
+                provider.as_ref(),
+                &request,
+                &cancel,
+                &retry::RETRY_DELAYS,
+                |attempt, delay, error| {
+                    let sink = sink.clone();
+                    async move {
+                        let first_line = error.lines().next().unwrap_or_default().to_string();
+                        let note = format!(
+                            "Provider error, retrying in {}s (attempt {attempt}/{}): {first_line}",
+                            delay.as_secs(),
+                            retry::RETRY_DELAYS.len() + 1
+                        );
+                        sink.status(session_id, ChatStatus::Thinking, Some(note)).await;
+                    }
+                },
+            )
+            .await;
+            let mut stream = match opened {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    sink.status(session_id, ChatStatus::Idle, Some("cancelled".into())).await;
+                    return Ok(());
+                }
                 Err(e) => {
                     sink.error(session_id, &format!("{e:#}")).await;
                     break;
