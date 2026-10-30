@@ -448,6 +448,41 @@ pub struct ModelRequest {
     pub max_tokens: Option<u64>,
 }
 
+/// A terminal agent CLI offered in the chat column's "+" menu. `command`
+/// comes only from the user's settings (never from model output) and runs
+/// in a terminal tab through the user's login shell.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentCli {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+}
+
+fn default_agent_enabled() -> bool {
+    true
+}
+
+pub fn default_agent_clis() -> Vec<AgentCli> {
+    [
+        ("claude", "Claude", "claude"),
+        ("codex", "Codex", "codex"),
+        ("opencode", "OpenCode", "opencode"),
+        ("gemini", "Gemini", "gemini"),
+        ("goose", "Goose", "goose session"),
+        ("aider", "Aider", "aider"),
+    ]
+    .into_iter()
+    .map(|(id, name, command)| AgentCli {
+        id: id.into(),
+        name: name.into(),
+        command: command.into(),
+        enabled: true,
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "default_theme")]
@@ -475,6 +510,9 @@ pub struct AppSettings {
     /// horizontally. Default on.
     #[serde(default = "default_editor_word_wrap")]
     pub editor_word_wrap: bool,
+    /// Agent CLIs for the chat column's "+" menu.
+    #[serde(default = "default_agent_clis")]
+    pub agent_clis: Vec<AgentCli>,
 }
 
 fn default_theme() -> String {
@@ -511,6 +549,7 @@ impl Default for AppSettings {
             show_hidden_files: true,
             credential_storage: default_credential_storage(),
             editor_word_wrap: default_editor_word_wrap(),
+            agent_clis: default_agent_clis(),
         }
     }
 }
@@ -555,6 +594,17 @@ pub fn new_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Settings saved before agent CLIs existed must load with the presets.
+    #[test]
+    fn settings_without_agent_clis_get_presets() {
+        let s: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(s.agent_clis, default_agent_clis());
+        let ids: Vec<&str> = s.agent_clis.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["claude", "codex", "opencode", "gemini", "goose", "aider"]);
+        assert!(s.agent_clis.iter().all(|a| a.enabled));
+        assert_eq!(AppSettings::default().agent_clis, default_agent_clis());
+    }
 
     /// Every enum that crosses the IPC boundary must serialize to exactly
     /// what `as_str()` returns (and what the TypeScript types declare).
