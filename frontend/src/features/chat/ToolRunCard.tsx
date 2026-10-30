@@ -9,6 +9,8 @@ import {
   FilePlus,
   FileSearch,
   FolderTree,
+  Globe,
+  ListChecks,
   Loader2,
   Search,
   ShieldAlert,
@@ -24,6 +26,9 @@ const TOOL_META: Record<string, { icon: typeof FileEdit; label: string }> = {
   fs_read: { icon: FileSearch, label: "Read file" },
   fs_write: { icon: FilePlus, label: "Write file" },
   fs_edit: { icon: FileEdit, label: "Edit file" },
+  fs_multi_edit: { icon: FileEdit, label: "Edit file" },
+  web_fetch: { icon: Globe, label: "Fetch" },
+  todo_write: { icon: ListChecks, label: "Todos" },
   fs_delete: { icon: Trash2, label: "Delete" },
   fs_list: { icon: FolderTree, label: "List directory" },
   fs_search: { icon: Search, label: "Search" },
@@ -67,7 +72,8 @@ export function ToolRunCard({
   const Icon = meta.icon;
   const visual = statusVisual(run.status);
   const pathArg = (run.args?.path as string) ?? null;
-  const cmdArg = (run.args?.command as string) ?? null;
+  const cmdArg = ((run.args?.command ?? run.args?.url) as string) ?? null;
+  const todos = run.tool_name === "todo_write" && run.status === "success" ? parseTodos(run.args?.todos) : null;
 
   return (
     <div className="my-1 overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-800">
@@ -114,6 +120,7 @@ export function ToolRunCard({
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
       </button>
+      {todos && <TodoList todos={todos} />}
       {open && (
         <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-2 text-[11px] dark:border-neutral-800 dark:bg-neutral-925">
           <div className="mb-1 font-semibold text-neutral-500">Arguments</div>
@@ -139,5 +146,53 @@ export function ToolRunCard({
         </div>
       )}
     </div>
+  );
+}
+
+interface Todo {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+function parseTodos(value: unknown): Todo[] | null {
+  if (!Array.isArray(value)) return null;
+  const todos = value.filter(
+    (t): t is Todo => typeof t?.content === "string" && ["pending", "in_progress", "completed"].includes(t?.status),
+  );
+  return todos.length ? todos : null;
+}
+
+/** The agent's checklist from a `todo_write` call. */
+function TodoList({ todos }: { todos: Todo[] }) {
+  return (
+    <ul className="border-t border-neutral-200 px-3 py-1.5 dark:border-neutral-800">
+      {todos.map((t, i) => (
+        <li key={i} className="flex items-start gap-2 py-0.5 text-[11.5px]">
+          <span
+            className={`mt-[3px] flex h-3 w-3 shrink-0 items-center justify-center rounded-[3px] border ${
+              t.status === "completed"
+                ? "border-accent-500 bg-accent-500 text-white dark:text-neutral-950"
+                : t.status === "in_progress"
+                  ? "border-accent-500"
+                  : "border-neutral-400 dark:border-neutral-600"
+            }`}
+          >
+            {t.status === "completed" && <Check size={9} strokeWidth={3} />}
+            {t.status === "in_progress" && <span className="h-1.5 w-1.5 animate-pulse rounded-[1px] bg-accent-500" />}
+          </span>
+          <span
+            className={
+              t.status === "completed"
+                ? "text-neutral-500 line-through"
+                : t.status === "in_progress"
+                  ? "font-medium text-neutral-900 dark:text-neutral-100"
+                  : "text-neutral-700 dark:text-neutral-300"
+            }
+          >
+            {t.content}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -5,6 +5,14 @@ import type { ApprovalRecord } from "@/lib/ipc";
 import { Button } from "@/components/ui";
 import { useChat } from "@/stores/chat";
 
+const GRANT_FOR_KIND: Record<string, string> = {
+  write_file: "write_files",
+  edit_file: "write_files",
+  delete_file: "delete_files",
+  run_command: "run_commands",
+  fetch_url: "fetch_urls",
+};
+
 export function ApprovalCard({
   approval,
   onOpenDiff,
@@ -38,8 +46,9 @@ export function ApprovalCard({
     }
   };
 
-  const isEdit = ["write_file", "edit_file", "delete_file"].includes(approval.kind);
-  const grantKind = isEdit ? "write_files" : "run_commands";
+  // Session grant matching this approval; sensitive or out-of-workspace
+  // reads have none (they are asked for every time).
+  const grantKind = GRANT_FOR_KIND[approval.kind] ?? null;
 
   return (
     <div
@@ -77,9 +86,11 @@ export function ApprovalCard({
               <Button variant="success" size="sm" disabled={busy} onClick={() => void answer(true)}>
                 Allow once
               </Button>
-              <Button size="sm" disabled={busy} onClick={() => void answer(true, grantKind)}>
-                Allow for this session
-              </Button>
+              {grantKind && (
+                <Button size="sm" disabled={busy} onClick={() => void answer(true, grantKind)}>
+                  Allow for this session
+                </Button>
+              )}
               <Button
                 variant="primary"
                 size="sm"

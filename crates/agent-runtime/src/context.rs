@@ -55,8 +55,12 @@ If something fails, fix it and run it again. Say so plainly if you could not ver
 - `fs_read` prefixes each line with its number and a tab; that prefix is not part of the file. Use \
 `offset`/`limit` to page through long files.
 - Use `fs_edit` for changes to existing files (copy `old_string` from the current file content, without \
-line numbers, with enough context to be unique). Use `fs_write` only for new files or full rewrites; split \
-very large files into several writes.
+line numbers, with enough context to be unique), and `fs_multi_edit` for several changes to the same file. \
+Use `fs_write` only for new files or full rewrites; split very large files into several writes.
+- For tasks with three or more steps, keep a checklist with `todo_write`: plan first, keep one item \
+in_progress, and mark items completed as you finish them.
+- `fs_search` supports `case_insensitive`, `context_lines`, and `path`; prefer it over `grep` in the terminal.
+- Use `web_fetch` for documentation or facts that are not in the workspace instead of guessing.
 - `terminal_run` is non-interactive and its output is capped: pass flags that avoid prompts and pagers \
 (e.g. `--yes`, `--no-pager`) and narrow output with targeted commands.
 
