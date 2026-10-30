@@ -12,6 +12,12 @@ import {
   type ToolRunRecord,
 } from "@/lib/ipc";
 
+export interface StreamingMessage {
+  messageId: string;
+  text: string;
+  reasoning: string;
+}
+
 interface ChatState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
@@ -19,8 +25,8 @@ interface ChatState {
   toolRuns: ToolRunRecord[];
   approvals: ApprovalRecord[];
   profiles: AgentProfile[];
-  /** Streaming assistant text being assembled from deltas. */
-  streaming: { messageId: string; text: string } | null;
+  /** Streaming assistant text (and reasoning) assembled from deltas. */
+  streaming: StreamingMessage | null;
   status: ChatStatus;
   statusDetail: string | null;
   lastError: string | null;
@@ -81,27 +87,27 @@ export const useChat = create<ChatState>((set, get) => ({
     });
     // Deltas arrive per token; coalesce them into one store update per
     // animation frame so the chat re-renders at display rate, not token rate.
-    let pending: { messageId: string; text: string } | null = null;
+    let pending: StreamingMessage | null = null;
     let frame: number | null = null;
     const flush = () => {
       frame = null;
       if (!pending) return;
-      const { messageId, text } = pending;
+      const { messageId, text, reasoning } = pending;
       pending = null;
       const cur = get().streaming;
       set({
         streaming:
           cur && cur.messageId === messageId
-            ? { messageId, text: cur.text + text }
-            : { messageId, text },
+            ? { messageId, text: cur.text + text, reasoning: cur.reasoning + reasoning }
+            : { messageId, text, reasoning },
       });
     };
     await events.chatDelta((e) => {
       if (e.session_id !== get().activeSessionId) return;
       if (pending && pending.messageId !== e.message_id) flush();
-      pending = pending
-        ? { messageId: e.message_id, text: pending.text + e.delta }
-        : { messageId: e.message_id, text: e.delta };
+      if (!pending) pending = { messageId: e.message_id, text: "", reasoning: "" };
+      if (e.reasoning) pending.reasoning += e.delta;
+      else pending.text += e.delta;
       if (frame === null) frame = requestAnimationFrame(flush);
     });
     await events.chatMessage((e) => {

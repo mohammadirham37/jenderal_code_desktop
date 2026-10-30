@@ -97,6 +97,8 @@ export interface MessageRecord {
   tool_calls: ToolCall[];
   tool_call_id?: string | null;
   tool_name?: string | null;
+  /** Model reasoning ("thinking") streamed separately from the answer. */
+  reasoning?: string | null;
   created_at: number;
 }
 
@@ -276,6 +278,8 @@ export interface ChatDeltaEvent {
   session_id: string;
   message_id: string;
   delta: string;
+  /** The delta is model reasoning, not answer text. */
+  reasoning?: boolean;
 }
 
 export interface MessageEvent {

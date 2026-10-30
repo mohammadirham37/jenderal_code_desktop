@@ -806,14 +806,54 @@ function PausedNotice({
  *  not re-render for every token. */
 function StreamingBubble({ full }: { full: boolean }) {
   const text = useChat((s) => s.streaming?.text ?? null);
+  const reasoning = useChat((s) => s.streaming?.reasoning ?? "");
   if (text === null) return null;
   return (
     <div className={full ? "mb-5" : "mb-3"}>
       <AssistantLabel live />
-      <div className={full ? "md" : "md border-l border-neutral-200 pl-3 dark:border-neutral-800"}>
-        <Markdown content={text} />
-        <span className="ml-0.5 inline-block h-[1.05em] w-[0.55em] animate-pulse bg-accent-400 align-[-0.15em]" />
+      <div className={full ? "" : "border-l border-neutral-200 pl-3 dark:border-neutral-800"}>
+        {reasoning && <ThinkingBlock text={reasoning} live={!text} />}
+        {(text || !reasoning) && (
+          <div className="md">
+            <Markdown content={text} />
+            <span className="ml-0.5 inline-block h-[1.05em] w-[0.55em] animate-pulse bg-accent-400 align-[-0.15em]" />
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** Model reasoning: open and following the tail while the model is still
+ *  thinking, otherwise a collapsed toggle. */
+function ThinkingBlock({ text, live = false }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const expanded = live || open;
+  useLayoutEffect(() => {
+    if (live && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [live, text]);
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={live}
+        className="eyebrow flex items-center gap-1 !text-neutral-500 hover:!text-neutral-700 disabled:cursor-default dark:hover:!text-neutral-300"
+      >
+        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        {live ? "Thinking…" : "Thinking"}
+      </button>
+      {expanded && (
+        <div
+          ref={bodyRef}
+          className={`mt-1 whitespace-pre-wrap break-words border-l border-neutral-200 pl-3 font-mono text-[11px] leading-relaxed text-neutral-500 dark:border-neutral-800 ${
+            live ? "max-h-40 overflow-y-auto" : ""
+          }`}
+        >
+          {text}
+        </div>
+      )}
     </div>
   );
 }
@@ -864,10 +904,11 @@ const MessageBubble = memo(function MessageBubble({
         </span>
       </AssistantLabel>
       <div className={full ? "" : "border-l border-neutral-200 pl-3 dark:border-neutral-800"}>
+        {message.reasoning && <ThinkingBlock text={message.reasoning} />}
         {message.content ? (
           <Markdown content={message.content} onOpenFile={onOpenFile} />
         ) : (
-          <span className="text-xs text-neutral-500">(tool calls only)</span>
+          !message.reasoning && <span className="text-xs text-neutral-500">(tool calls only)</span>
         )}
       </div>
     </div>
