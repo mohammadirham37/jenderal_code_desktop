@@ -65,9 +65,21 @@ pub fn detect(commands: &[String]) -> Vec<bool> {
         .unwrap_or_else(|| vec![false; commands.len()])
 }
 
+/// Login *and* interactive, like the terminal tabs: many installers (nvm,
+/// opencode, bun, ...) add themselves to PATH in `~/.zshrc`, which a
+/// non-interactive login shell does not read.
+fn shell_command(shell: &str, script: &str) -> Command {
+    let mut cmd = Command::new(shell);
+    cmd.args(["-l", "-i", "-c", script]);
+    cmd
+}
+
 fn run_script(script: &str) -> Option<String> {
-    let mut child = Command::new(crate::terminal::user_shell())
-        .args(["-l", "-c", script])
+    run_command(shell_command(&crate::terminal::user_shell(), script))
+}
+
+fn run_command(mut cmd: Command) -> Option<String> {
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -119,6 +131,32 @@ mod tests {
             parse_output("Welcome back!\njc:2\njc:0\njc:9\njc:x\n", 3),
             vec![true, false, true]
         );
+    }
+
+    /// Regression: opencode adds its bin dir to PATH in `~/.zshrc`. Started
+    /// from Finder (minimal PATH), detection must still find it.
+    #[cfg(unix)]
+    #[test]
+    fn finds_programs_added_to_path_in_zshrc() {
+        if !std::path::Path::new("/bin/zsh").exists() {
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("tool/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("jc-fake-agent");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::fs::write(home.path().join(".zshrc"), format!("export PATH={}:$PATH\n", bin.display())).unwrap();
+
+        let script = build_script(&[Some("jc-fake-agent")]);
+        let mut cmd = shell_command("/bin/zsh", &script);
+        cmd.env_clear()
+            .env("HOME", home.path())
+            .env("ZDOTDIR", home.path())
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+        let out = run_command(cmd).expect("shell ran");
+        assert_eq!(parse_output(&out, 1), vec![true], "output: {out:?}");
     }
 
     #[cfg(unix)]
