@@ -17,6 +17,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("004_raise_iteration_limit", include_str!("../migrations/004_raise_iteration_limit.sql")),
     ("005_show_hidden_files", include_str!("../migrations/005_show_hidden_files.sql")),
     ("006_message_reasoning", include_str!("../migrations/006_message_reasoning.sql")),
+    ("007_antigravity_agent", include_str!("../migrations/007_antigravity_agent.sql")),
 ];
 
 pub struct Db {
@@ -1220,6 +1221,22 @@ mod tests {
         // `_` and `%` must be literal, not wildcards.
         assert!(d.search_sessions("done_o_").unwrap().is_empty());
         assert!(d.search_sessions("1%done").unwrap().is_empty());
+    }
+
+    #[test]
+    fn antigravity_agent_is_added_to_saved_agent_lists_once() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        settings.agent_clis.retain(|a| a.id != "antigravity");
+        settings.agent_clis.truncate(2);
+        d.save_settings(&settings).unwrap();
+
+        let sql = include_str!("../migrations/007_antigravity_agent.sql");
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(sql)?)).unwrap();
+        }
+        let ids: Vec<String> = d.get_settings().unwrap().agent_clis.into_iter().map(|a| a.id).collect();
+        assert_eq!(ids, ["claude", "codex", "antigravity"]);
     }
 
     #[test]

@@ -479,6 +479,7 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
         ("claude", "Claude", "claude"),
         ("codex", "Codex", "codex"),
         ("opencode", "OpenCode", "opencode"),
+        ("antigravity", "Antigravity", "agy"),
         ("gemini", "Gemini", "gemini"),
         ("goose", "Goose", "goose session"),
         ("aider", "Aider", "aider"),
@@ -671,7 +672,7 @@ mod tests {
         let s: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(s.agent_clis, default_agent_clis());
         let ids: Vec<&str> = s.agent_clis.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode", "gemini", "goose", "aider"]);
+        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "gemini", "goose", "aider"]);
         assert!(s.agent_clis.iter().all(|a| a.enabled));
         assert_eq!(AppSettings::default().agent_clis, default_agent_clis());
     }
