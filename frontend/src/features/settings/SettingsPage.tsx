@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import {
   BarChart3,
+  Bot,
   Coins,
   Database,
   Download,
@@ -16,6 +17,7 @@ import { api, type UsageSummary } from "@/lib/ipc";
 import { useApp } from "@/stores/app";
 import { Button, Field, inputClass } from "@/components/ui";
 import { formatCost, formatTokens } from "@/lib/format";
+import { AgentCliSettings } from "./AgentCliSettings";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 const SHORTCUTS: [string, string][] = [
@@ -215,6 +217,18 @@ export function SettingsPage() {
                 </Button>
               </div>
             </Field>
+          </section>
+
+          {/* Agent CLIs */}
+          <section id="agent-clis">
+            <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              <Bot size={13} /> Agent CLIs
+            </h2>
+            <p className="mb-3 text-[11px] text-neutral-500">
+              Shown in the + menu of the chat column. Each command runs in a terminal tab through your login
+              shell, so it uses your PATH and the CLI's own login.
+            </p>
+            <AgentCliSettings />
           </section>
 
           {/* Permissions */}
