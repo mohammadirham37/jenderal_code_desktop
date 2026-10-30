@@ -82,6 +82,8 @@ const MAX_ATTACHMENTS = 10;
 
 /** Must match `PAUSE_MARKER` in crates/agent-runtime. */
 const PAUSE_MARKER = "⏸ **Paused.**";
+/** Must match `COMPACTION_MARKER` in crates/agent-runtime/src/context.rs. */
+const COMPACTION_MARKER = "📋 **Summary of earlier conversation**";
 const CONTINUE_PROMPT = "Continue where you left off.";
 
 export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
@@ -878,6 +880,9 @@ const MessageBubble = memo(function MessageBubble({
   onOpenFile: (path: string) => void;
 }) {
   const time = new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (message.role === "user" && message.content.startsWith(COMPACTION_MARKER)) {
+    return <SummaryCard content={message.content.slice(COMPACTION_MARKER.length).trim()} full={full} />;
+  }
   if (message.role === "user") {
     return (
       <div className={`group flex animate-rise flex-col ${full ? "mb-6 items-end" : "mb-4"}`}>
@@ -914,6 +919,30 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   );
 });
+
+/** Earlier turns were summarized to free context; the summary replaces them
+ *  for the model (they stay visible above). */
+function SummaryCard({ content, full }: { content: string; full: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`animate-rise rounded-[5px] border border-dashed border-neutral-300 dark:border-neutral-700 ${full ? "mb-6" : "mb-4"}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span className="eyebrow">Earlier conversation summarized</span>
+        <span className="ml-auto text-[10.5px] text-neutral-500">the agent continues from this summary</span>
+      </button>
+      {open && (
+        <div className="md border-t border-neutral-200 px-3 py-2 dark:border-neutral-800">
+          <Markdown content={content} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

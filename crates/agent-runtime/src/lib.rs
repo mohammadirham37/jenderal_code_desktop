@@ -519,11 +519,13 @@ impl AgentRuntime {
         // ------------------------------------------------------------------
         let prior = db.list_messages(session_id)?;
         let existing_count = prior.len();
-        let mut history: Vec<ChatMessage> = prior
+        let history: Vec<ChatMessage> = prior
             .into_iter()
             .filter(|m| m.role != Role::System)
             .map(to_chat_message)
             .collect();
+        // A compaction summary stands in for everything before it.
+        let mut history = context::trim_to_last_compaction(history);
 
         // ------------------------------------------------------------------
         // Persist the user message (with packed attachments).
@@ -547,6 +549,7 @@ impl AgentRuntime {
             reasoning: None,
             created_at: now_ms(),
         };
+        let user_created_at = user_msg.created_at;
         db.append_message(&user_msg)?;
         sink.message(session_id, &user_msg).await;
         history.push(to_chat_message(user_msg));
@@ -580,6 +583,32 @@ impl AgentRuntime {
             model_info.as_ref().and_then(|m| m.capabilities.max_output_tokens),
             system.len(),
         );
+
+        // Near the context limit, summarize the earlier turns once at the
+        // start of the turn instead of silently dropping them later.
+        if let Some(split) = context::compaction_split(&history, history_budget) {
+            let summary = self
+                .summarize(session_id, &provider, provider_cfg, model_name, &model_info, &history[..split], history_budget, &cancel)
+                .await;
+            if let Some(summary) = summary {
+                let marker = MessageRecord {
+                    id: new_id(),
+                    session_id: session_id.into(),
+                    role: Role::User,
+                    content: format!("{}\n\n{summary}", context::COMPACTION_MARKER),
+                    tool_calls: vec![],
+                    tool_call_id: None,
+                    tool_name: None,
+                    reasoning: None,
+                    // Sorts just before the request that triggered it.
+                    created_at: user_created_at - 1,
+                };
+                db.append_message(&marker)?;
+                sink.message(session_id, &marker).await;
+                history.drain(..split);
+                history.insert(0, to_chat_message(marker));
+            }
+        }
 
         let mut iteration = 0u32;
         // Consecutive failures of the exact same tool call: a model that
@@ -721,23 +750,7 @@ impl AgentRuntime {
                 history.push(to_chat_message(assistant_msg));
             }
 
-            // Usage + cost estimate.
-            if usage.input_tokens > 0 || usage.output_tokens > 0 {
-                let cost = estimate_cost(&model_info, usage);
-                let recorded = db.insert_usage_record(&UsageRecord {
-                    id: new_id(),
-                    session_id: session_id.into(),
-                    provider_id: provider_cfg.id.clone(),
-                    model_name: model_name.to_string(),
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                    cost_estimate: cost,
-                    created_at: now_ms(),
-                });
-                if recorded.is_ok() {
-                    sink.usage(session_id, usage, cost).await;
-                }
-            }
+            record_usage(&db, &sink, session_id, provider_cfg, model_name, &model_info, usage).await;
 
             if cancelled {
                 sink.status(session_id, ChatStatus::Idle, Some("cancelled".into()))
@@ -842,6 +855,55 @@ impl AgentRuntime {
         let _ = db.touch_session(session_id);
         sink.status(session_id, ChatStatus::Idle, None).await;
         Ok(())
+    }
+
+    /// Summarize earlier turns with the session's own model. `None` on any
+    /// failure or cancellation (the caller then keeps the full history and
+    /// relies on trimming).
+    #[allow(clippy::too_many_arguments)]
+    async fn summarize(
+        &self,
+        session_id: &str,
+        provider: &Arc<dyn AiProvider>,
+        provider_cfg: &ProviderConfig,
+        model_name: &str,
+        model_info: &Option<ModelInfo>,
+        earlier: &[ChatMessage],
+        budget: usize,
+        cancel: &CancelToken,
+    ) -> Option<String> {
+        self.events
+            .status(session_id, ChatStatus::Thinking, Some("Summarizing earlier conversation".into()))
+            .await;
+        let prompt = format!(
+            "{SUMMARY_INSTRUCTIONS}\n\n<transcript>\n{}\n</transcript>",
+            context::transcript(earlier, budget * 6 / 10)
+        );
+        let request = ModelRequest {
+            model: model_name.to_string(),
+            messages: vec![ChatMessage::new(Role::User, prompt)],
+            tools: vec![],
+            system: Some("You summarize coding-assistant sessions so the work can continue without the full transcript.".into()),
+            temperature: None,
+            max_tokens: model_info.as_ref().and_then(|m| m.capabilities.max_output_tokens).map(|m| m.min(8_192)),
+        };
+        let mut stream = provider.stream(request).await.ok()?;
+        let mut text = String::new();
+        let mut usage = TokenUsage::default();
+        loop {
+            tokio::select! {
+                ev = stream.next() => match ev {
+                    Some(StreamEvent::TextDelta(t)) => text.push_str(&t),
+                    Some(StreamEvent::Usage(u)) => usage = u,
+                    Some(StreamEvent::Done { .. }) | None => break,
+                    Some(_) => {}
+                },
+                _ = cancel.cancelled() => return None,
+            }
+        }
+        record_usage(&self.db, &self.events, session_id, provider_cfg, model_name, model_info, usage).await;
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
     }
 
     /// End the turn early with a visible assistant note (rather than an
@@ -1103,6 +1165,41 @@ async fn emit_tool_update(
     }
 }
 
+const SUMMARY_INSTRUCTIONS: &str = "Summarize the conversation transcript below so that a coding agent can \
+continue the work from the summary alone. Write it in the user's language as concise Markdown bullet points \
+under these headings: Goal, Decisions and constraints, Files and changes (exact paths, what changed, current \
+state), Commands and results (builds, tests, errors), Open issues and next steps, User preferences. Keep file \
+paths, identifiers, commands and error messages exact. Do not invent anything that is not in the transcript.";
+
+/// Persist a usage record and report it to the UI.
+async fn record_usage(
+    db: &Arc<Db>,
+    sink: &Arc<dyn EventSink>,
+    session_id: &str,
+    provider_cfg: &ProviderConfig,
+    model_name: &str,
+    model_info: &Option<ModelInfo>,
+    usage: TokenUsage,
+) {
+    if usage.input_tokens == 0 && usage.output_tokens == 0 {
+        return;
+    }
+    let cost = estimate_cost(model_info, usage);
+    let recorded = db.insert_usage_record(&UsageRecord {
+        id: new_id(),
+        session_id: session_id.into(),
+        provider_id: provider_cfg.id.clone(),
+        model_name: model_name.to_string(),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cost_estimate: cost,
+        created_at: now_ms(),
+    });
+    if recorded.is_ok() {
+        sink.usage(session_id, usage, cost).await;
+    }
+}
+
 /// Tool-result text for a call whose arguments are not a JSON object.
 /// Output cut off by the token limit is the usual cause for large writes,
 /// so say so instead of reporting a confusing "missing argument".
@@ -1223,6 +1320,45 @@ mod tests {
         assert!(last.tool_calls.is_empty());
         // The tool call before the note got its result, so history stays valid.
         assert_eq!(messages[messages.len() - 2].role, Role::Tool);
+    }
+
+    #[tokio::test]
+    async fn long_history_is_compacted_into_a_summary() {
+        let (rt, sink, dir, session_id) = setup().await;
+        rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Balanced);
+        // ~350k chars of earlier turns against the mock's ~370k-char budget.
+        let big = "lorem ipsum ".repeat(3_000);
+        for i in 0..10 {
+            for role in [Role::User, Role::Assistant] {
+                rt.db
+                    .append_message(&MessageRecord {
+                        id: new_id(),
+                        session_id: session_id.clone(),
+                        role,
+                        content: format!("{i}: {big}"),
+                        tool_calls: vec![],
+                        tool_call_id: None,
+                        tool_name: None,
+                        reasoning: None,
+                        created_at: i as i64 * 10 + if role == Role::User { 0 } else { 1 },
+                    })
+                    .unwrap();
+            }
+        }
+        rt.send_message(&session_id, "hello there", &[]).await.unwrap();
+        wait_idle(&sink).await;
+
+        let msgs = rt.db.list_messages(&session_id).unwrap();
+        let marker = msgs
+            .iter()
+            .position(|m| m.content.starts_with(context::COMPACTION_MARKER))
+            .expect("summary persisted");
+        assert_eq!(msgs[marker].role, Role::User);
+        assert_eq!(msgs[marker + 1].content, "hello there", "summary sorts right before the request");
+        // The next turn starts from the summary.
+        let history = context::trim_to_last_compaction(msgs.into_iter().map(to_chat_message).collect());
+        assert!(history[0].content.starts_with(context::COMPACTION_MARKER));
+        assert!(history.iter().all(|m| !m.content.contains("lorem ipsum")), "earlier turns replaced");
     }
 
     #[tokio::test]

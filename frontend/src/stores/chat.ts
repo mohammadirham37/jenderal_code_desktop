@@ -123,7 +123,9 @@ export const useChat = create<ChatState>((set, get) => ({
       set((s) => {
         if (s.messages.some((m) => m.id === e.message.id)) return {};
         const streaming = s.streaming;
-        const messages = [...s.messages, e.message];
+        // Keep creation order: a compaction summary is created after, but
+        // dated just before, the request that triggered it.
+        const messages = [...s.messages, e.message].sort((a, b) => a.created_at - b.created_at);
         const cleared =
           streaming && streaming.messageId === e.message.id ? null : streaming;
         return { messages, streaming: cleared };

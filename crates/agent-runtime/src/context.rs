@@ -238,12 +238,95 @@ pub fn history_budget(context_window: Option<u64>, max_output_tokens: Option<u64
 /// Build the message list for a request: repair tool-call pairing, shorten
 /// old tool results, and fit into the budget. Does not touch the DB.
 pub fn prepare_history(history: &[ChatMessage], budget: usize) -> Vec<ChatMessage> {
-    let mut msgs = sanitize_tool_pairs(history.to_vec());
+    let mut msgs = sanitize_tool_pairs(merge_consecutive_user_messages(history.to_vec()));
     drop_reasoning_before_last_user(&mut msgs);
     let budget_chars = if budget == 0 { DEFAULT_HISTORY_CHARS } else { budget };
     let protect = PROTECTED_TOOL_CHARS.min(budget_chars / 2);
     truncate_old_tool_results(&mut msgs, protect, OLD_TOOL_RESULT_BYTES);
     fit_history(msgs, budget)
+}
+
+/// Prefix of the persisted user message that replaces older history after a
+/// compaction. Keep in sync with `ChatPanel.tsx`.
+pub const COMPACTION_MARKER: &str = "📋 **Summary of earlier conversation**";
+
+/// Share of the history budget at which earlier turns get summarized.
+const COMPACT_AT: f64 = 0.8;
+/// Only worth it when the earlier turns are a real part of that.
+const COMPACT_MIN_PREFIX: f64 = 0.3;
+/// Per tool result in the transcript sent to the summarizer.
+const TRANSCRIPT_TOOL_CHARS: usize = 1_500;
+
+/// Drop everything before the newest compaction summary: the summary stands
+/// in for it.
+pub fn trim_to_last_compaction(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    match messages
+        .iter()
+        .rposition(|m| m.role == Role::User && m.content.starts_with(COMPACTION_MARKER))
+    {
+        Some(i) => messages.into_iter().skip(i).collect(),
+        None => messages,
+    }
+}
+
+/// Index of the current turn's user message when the turns before it should
+/// be summarized: the history is near the budget and earlier turns make up
+/// a meaningful share of it.
+pub fn compaction_split(history: &[ChatMessage], budget: usize) -> Option<usize> {
+    let budget = if budget == 0 { DEFAULT_HISTORY_CHARS } else { budget } as f64;
+    let last_user = history.iter().rposition(|m| m.role == Role::User)?;
+    if last_user < 2 {
+        return None;
+    }
+    let total: usize = history.iter().map(message_size).sum();
+    let prefix: usize = history[..last_user].iter().map(message_size).sum();
+    (total as f64 > budget * COMPACT_AT && prefix as f64 > budget * COMPACT_MIN_PREFIX).then_some(last_user)
+}
+
+/// Plain-text transcript of `messages` for the summarizer, at most
+/// `max_chars` (the oldest part is dropped first).
+pub fn transcript(messages: &[ChatMessage], max_chars: usize) -> String {
+    let mut parts: Vec<String> = messages
+        .iter()
+        .map(|m| match m.role {
+            Role::Tool => format!(
+                "[tool result: {}]\n{}",
+                m.tool_name.as_deref().unwrap_or("tool"),
+                trim_to(m.content.clone(), TRANSCRIPT_TOOL_CHARS)
+            ),
+            Role::Assistant => {
+                let calls: Vec<String> = m
+                    .tool_calls
+                    .iter()
+                    .map(|c| format!("[tool call: {} {}]", c.name, trim_to(c.arguments.clone(), 400)))
+                    .collect();
+                format!("ASSISTANT: {}\n{}", m.content, calls.join("\n")).trim_end().to_string()
+            }
+            Role::User => format!("USER: {}", m.content),
+            Role::System => format!("SYSTEM: {}", m.content),
+        })
+        .collect();
+    let mut total: usize = parts.iter().map(|p| p.len() + 2).sum();
+    while total > max_chars && parts.len() > 1 {
+        total -= parts.remove(0).len() + 2;
+    }
+    parts.join("\n\n")
+}
+
+/// Join directly adjacent user messages (e.g. a compaction summary followed
+/// by the new request): some providers require alternating roles.
+pub fn merge_consecutive_user_messages(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    let mut out: Vec<ChatMessage> = Vec::with_capacity(messages.len());
+    for m in messages {
+        match out.last_mut() {
+            Some(prev) if prev.role == Role::User && m.role == Role::User => {
+                prev.content.push_str("\n\n---\n\n");
+                prev.content.push_str(&m.content);
+            }
+            _ => out.push(m),
+        }
+    }
+    out
 }
 
 /// Reasoning is sent back only for the turn in progress (after the last user
@@ -587,6 +670,42 @@ mod tests {
         let out = prepare_history(&history, 0);
         assert_eq!(out[1].reasoning, None);
         assert_eq!(out[3].reasoning.as_deref(), Some("current thoughts"));
+    }
+
+    #[test]
+    fn compaction_helpers() {
+        let big = "x".repeat(4_000);
+        let mut history = Vec::new();
+        for i in 0..5 {
+            history.push(ChatMessage::new(Role::User, format!("q{i}")));
+            history.push(assistant_calls(&[&format!("c{i}")]));
+            history.push(tool_result(&format!("c{i}"), &big));
+            history.push(ChatMessage::new(Role::Assistant, format!("a{i}")));
+        }
+        history.push(ChatMessage::new(Role::User, "now"));
+        // ~20 KB of history: compact against a 20 KB budget, not a huge one.
+        assert_eq!(compaction_split(&history, 20_000), Some(history.len() - 1));
+        assert_eq!(compaction_split(&history, 1_000_000), None);
+
+        let t = transcript(&history[..history.len() - 1], 5_000);
+        assert!(t.len() <= 5_000);
+        assert!(t.contains("USER: q4"), "newest turns kept");
+        assert!(!t.contains("USER: q0"), "oldest turns dropped first");
+        assert!(t.contains("[tool call: fs_read"));
+
+        let marker = ChatMessage::new(Role::User, format!("{COMPACTION_MARKER}\n\nsummary"));
+        let mut loaded = history.clone();
+        loaded.insert(8, marker);
+        let trimmed = trim_to_last_compaction(loaded);
+        assert!(trimmed[0].content.starts_with(COMPACTION_MARKER));
+        assert_eq!(trimmed.len(), history.len() - 8 + 1);
+
+        let merged = merge_consecutive_user_messages(vec![
+            ChatMessage::new(Role::User, "summary"),
+            ChatMessage::new(Role::User, "request"),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].content, "summary\n\n---\n\nrequest");
     }
 
     #[test]
