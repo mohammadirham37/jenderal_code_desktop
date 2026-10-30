@@ -32,7 +32,7 @@ Signature menjadi `create(app, id, cwd, cols, rows, command: Option<&str>)`.
 Command Tauri baru `detect_agent_clis(commands: Vec<String>) -> Vec<bool>` (async, body di `spawn_blocking`):
 
 - Ambil kata pertama setiap command (nama program).
-- Satu kali panggilan `$SHELL -l -c 'command -v a >/dev/null 2>&1 && echo 1 || echo 0; …'` dengan nama program di-quote aman; hasil dipetakan berurutan. Nama program yang mengandung karakter di luar `[A-Za-z0-9._+-]` langsung dianggap `false` tanpa masuk shell.
+- Satu kali panggilan `$SHELL -l -c '<skrip>'`; untuk setiap nama valid skrip berisi `command -v '<nama>' >/dev/null 2>&1 && echo jc:<index>;`. Output dipindai untuk baris `jc:<index>`, jadi teks lain dari profile user diabaikan. Nama program yang mengandung karakter di luar `[A-Za-z0-9._+/-]` atau diawali `-` langsung dianggap `false` tanpa masuk shell.
 - Timeout 5 detik; gagal/timeout → semua `false`.
 - Windows: pakai `which()` yang sudah ada.
 
@@ -55,11 +55,13 @@ Preset default: Claude (`claude`), Codex (`codex`), OpenCode (`opencode`), Gemin
 
 ## Frontend
 
-### `XtermView`
+### Registry xterm + `XtermView`
 
-Logika xterm dari `TerminalPanel` (pembuatan instance, tema, fit, resize observer, font size, event data/exit) diekstrak ke komponen `features/terminal/XtermView.tsx` yang menerima `terminalId` dan `visible`. `TerminalPanel` dan tab tengah sama-sama memakainya.
+Instance xterm disimpan di module `features/terminal/xtermRegistry.ts`, di luar React. Instance dibuat sebelum PTY (`ensureXterm`), jadi output awal tidak hilang. Elemen DOM-nya dipindah antar host saat komponen remount, jadi scrollback tetap ada saat user pindah halaman (mis. ke Settings) atau ganti layout. Listener `terminal://data` dan `terminal://exit` dipasang sekali di registry; saat exit, registry menulis `[process exited]`.
 
-Saat proses exit, `XtermView` menulis `[process exited]` dan memanggil `onExit`; tab tengah lalu menampilkan tombol **Restart** yang membuat ulang PTY dengan id dan command yang sama.
+`XtermView` (`terminalId`, `active`) hanya menempelkan instance dari registry ke host-nya dan melakukan refit lewat `ResizeObserver`. `TerminalPanel` di context panel juga memakai `XtermView` dan tetap meng-kill PTY-nya sendiri saat unmount (perilaku lama).
+
+Tab tengah yang exit menampilkan bar dengan tombol **Restart**, yang membuat ulang PTY dengan id dan command yang sama.
 
 ### Store `useCenterTabs`
 
@@ -67,13 +69,14 @@ Zustand store: `{ tabs: CenterTab[], activeId: "chat" | string }` dengan `Center
 
 - `openTerminal()` / `openAgent(agent)`: buat id, panggil `terminalCreate(id, 80, 24, command)`, tambah tab, aktifkan.
 - `close(id)`: `terminalKill` lalu hapus tab; tab aktif pindah ke tetangga atau Chat.
-- `reset()`: kill semua PTY dan kosongkan tab. Dipanggil saat workspace berganti dan saat `ChatLayout` unmount.
+- `reset()`: kill semua PTY dan kosongkan tab. Dipanggil saat workspace berganti atau ditutup. Unmount `ChatLayout` (pindah halaman/layout) **tidak** meng-kill tab.
+- Store memuat registry xterm lewat `import()` dinamis, jadi xterm.js tetap di luar bundle awal.
 - Judul tab: nama agent, atau `zsh 2`, dst. untuk terminal biasa.
 
 ### `ChatLayout` – `CenterTabs`
 
 - Tab strip di atas kolom tengah: **Chat** (selalu ada, tidak bisa ditutup), lalu tab terminal/agent dengan tombol tutup, lalu tombol **+**.
-- Isi: `ChatPanel` dan setiap `XtermView` tetap ter-mount; yang tidak aktif disembunyikan (`hidden`), jadi PTY dan state chat bertahan saat pindah tab atau ganti sesi chat.
+- Isi: `ChatPanel` dan setiap `XtermView` tetap ter-mount selama layout tampil; yang tidak aktif disembunyikan (`hidden`).
 - Tombol toggle context panel tetap di pojok kanan atas.
 
 ### Menu +
@@ -81,7 +84,7 @@ Zustand store: `{ tabs: CenterTab[], activeId: "chat" | string }` dengan `Center
 Popover dengan:
 
 1. **New Terminal** (⌘T)
-2. Pemisah, lalu agent dengan `enabled = true`. Saat menu dibuka, `detectAgentClis` dipanggil sekali per workspace (hasil di-cache di store). Agent yang tidak terdeteksi tampil redup dengan label `not installed`, tetapi tetap bisa diklik (deteksi bisa salah, mis. alias).
+2. Pemisah, lalu agent dengan `enabled = true`. Saat menu dibuka, `detectAgentClis` dipanggil bila cache kosong (cache di store, dikosongkan saat workspace atau daftar agent berubah). Agent yang tidak terdeteksi tampil redup dengan label `not installed`, tetapi tetap bisa diklik (deteksi bisa salah, mis. alias).
 3. Pemisah, lalu **Agent settings…** yang membuka Settings ke section Agent CLIs.
 
 Ikon: lucide (`Terminal`, `Bot`), tanpa logo vendor. Gaya mengikuti visual system (`neutral-*`, `accent-*`, `font-mono`, radius kecil).
@@ -106,4 +109,4 @@ Tambah tipe `AgentCli`, field `agent_clis` di `AppSettings`, argumen `command?` 
 - Rust (`apps/desktop`): fungsi murni builder skrip deteksi (quoting, penolakan nama tidak valid, pemetaan output); serde default `agent_clis` pada JSON settings lama.
 - Rust: helper yang membangun `CommandBuilder` untuk `Some(cmd)` menghasilkan argumen `-l -i -c cmd`.
 - Frontend: `npm run build` (tsc + vite).
-- Manual: buka tab Claude dan zsh, ganti sesi chat, pastikan PTY tetap hidup; exit agent lalu Restart; ganti workspace, pastikan semua PTY mati.
+- Manual: buka tab Claude dan zsh, ganti sesi chat, pastikan PTY tetap hidup; exit agent lalu Restart; buka Settings lalu kembali, pastikan tab dan scrollback masih ada; ganti workspace, pastikan semua PTY mati.
