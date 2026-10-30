@@ -11,6 +11,7 @@ import {
   Keyboard,
   Palette,
   ShieldCheck,
+  BookOpen,
   Trash2,
 } from "lucide-react";
 import { api, type UsageSummary } from "@/lib/ipc";
@@ -18,6 +19,7 @@ import { useApp } from "@/stores/app";
 import { Button, Field, inputClass } from "@/components/ui";
 import { formatCost, formatTokens } from "@/lib/format";
 import { AgentCliSettings } from "./AgentCliSettings";
+import { SkillsSettings } from "./SkillsSettings";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 const SHORTCUTS: [string, string][] = [
@@ -217,6 +219,18 @@ export function SettingsPage() {
                 </Button>
               </div>
             </Field>
+          </section>
+
+          {/* Skills */}
+          <section id="skills">
+            <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              <BookOpen size={13} /> Skills
+            </h2>
+            <p className="mb-3 text-[11px] text-neutral-500">
+              Packaged instructions the agent loads when a task matches (brainstorming, planning, debugging, …). Type
+              <code className="mx-1 font-mono">/</code>in the chat to run one directly.
+            </p>
+            <SkillsSettings />
           </section>
 
           {/* Agent CLIs */}

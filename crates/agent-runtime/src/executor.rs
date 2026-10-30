@@ -32,6 +32,8 @@ pub struct ToolContext {
     /// Language servers for diagnostics after edits, and whether missing
     /// servers may be downloaded.
     pub lsp: Option<(Arc<jcode_tool_lsp::LspManager>, bool)>,
+    /// Skills the agent can load with the `skill` tool.
+    pub skills: Arc<Vec<crate::skills::Skill>>,
 }
 
 /// Size and modification time of a file when the agent last saw it.
@@ -60,7 +62,13 @@ impl ToolContext {
             checkpoints: checkpoints.map(Arc::new),
             files: SharedFileTracker::default(),
             lsp: None,
+            skills: Arc::default(),
         }
+    }
+
+    pub fn with_skills(mut self, skills: Arc<Vec<crate::skills::Skill>>) -> Self {
+        self.skills = skills;
+        self
     }
 
     pub fn with_lsp(mut self, lsp: Arc<jcode_tool_lsp::LspManager>, allow_download: bool) -> Self {
@@ -209,6 +217,17 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
             &["url"],
         ),
         spec(
+            "skill",
+            "Load a skill: packaged instructions for a kind of task (listed under Skills in the system prompt). \
+             Call it before starting work that matches a skill's description, then follow what it says. Use \
+             `file` to read one of the skill's extra files mentioned in its instructions.",
+            json!({
+                "name": {"type": "string", "description": "Skill name"},
+                "file": {"type": "string", "description": "Optional file inside the skill folder, e.g. reference.md"}
+            }),
+            &["name"],
+        ),
+        spec(
             "task",
             "Delegate a self-contained research or exploration task to a sub-agent with read-only tools (read, \
              list, search, glob, git). It works in its own context and returns only a final report, so use it to \
@@ -327,7 +346,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
 pub fn is_parallel_safe(name: &str) -> bool {
     matches!(
         name,
-        "fs_read" | "fs_list" | "fs_search" | "glob_files" | "git_status" | "git_diff" | "git_log" | "todo_write" | "task"
+        "fs_read" | "fs_list" | "fs_search" | "glob_files" | "git_status" | "git_diff" | "git_log" | "todo_write" | "task" | "skill"
     )
 }
 
@@ -428,7 +447,7 @@ pub fn classify(name: &str, args: &Value, ctx: &ToolContext) -> Result<Action> {
             }
         }
         // `todo_write` only echoes its arguments: classify it as a plain read.
-        "fs_list" | "glob_files" | "fs_search" | "git_status" | "git_diff" | "git_log" | "todo_write" | "task" => {
+        "fs_list" | "glob_files" | "fs_search" | "git_status" | "git_diff" | "git_log" | "todo_write" | "task" | "skill" => {
             // Read-only tools: reads stay inside the workspace (enforced at
             // execution by Workspace::resolve).
             Ok(Action::ReadFile {
@@ -826,6 +845,21 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
                 )),
                 diff: Some(out.diff),
             })
+        }
+        "skill" => {
+            let name = get_str(args, "name")?;
+            let skill = ctx.skills.iter().find(|s| s.name == name.trim()).ok_or_else(|| {
+                let names: Vec<&str> = ctx.skills.iter().map(|s| s.name.as_str()).collect();
+                anyhow!("unknown skill `{name}`. Available: {}", if names.is_empty() { "none".into() } else { names.join(", ") })
+            })?;
+            let (summary, body) = match get_str_opt(args, "file").filter(|f| !f.trim().is_empty()) {
+                Some(file) => (
+                    format!("Skill {} · {file}", skill.name),
+                    format!("--- {}/{file} ---\n{}", skill.name, crate::skills::read_file(skill, &file)?),
+                ),
+                None => (format!("Loaded skill {}", skill.name), crate::skills::load(skill)?),
+            };
+            Ok(ToolOutcome { summary, result_for_model: truncate_for_model(&body), diff: None })
         }
         "todo_write" => {
             let (summary, result_for_model) = crate::todo::apply(args)?;
@@ -1315,6 +1349,26 @@ mod tests {
         assert!(first.contains(r#"<directory-instructions path="app/web/CLAUDE.md">"#));
         let second = read("app/web/other.ts").await;
         assert!(!second.contains("directory-instructions"), "shown once per session");
+    }
+
+    #[tokio::test]
+    async fn skill_tool_loads_instructions_and_files() {
+        let (_t, c) = ctx();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("SKILL.md"), "---\nname: plan\ndescription: d\n---\nWrite a plan.").unwrap();
+        std::fs::write(dir.path().join("template.md"), "## Steps").unwrap();
+        let skill = crate::skills::Skill { name: "plan".into(), description: "d".into(), dir: dir.path().into(), project: false };
+        let c = c.with_skills(Arc::new(vec![skill]));
+        let run = |args: Value| {
+            let c = c.clone();
+            async move { execute("skill", &args, &c, &CancelToken::new()).await }
+        };
+        let out = run(json!({"name": "plan"})).await.unwrap();
+        assert!(out.result_for_model.contains("Write a plan.") && out.result_for_model.contains("template.md"));
+        let out = run(json!({"name": "plan", "file": "template.md"})).await.unwrap();
+        assert!(out.result_for_model.contains("## Steps"));
+        let err = run(json!({"name": "nope"})).await.err().unwrap().to_string();
+        assert!(err.contains("Available: plan"), "{err}");
     }
 
     #[tokio::test]

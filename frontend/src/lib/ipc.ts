@@ -190,6 +190,26 @@ export interface AppSettings {
   lsp_diagnostics: boolean;
   /** Download missing language servers with npx. */
   lsp_auto_download: boolean;
+  /** Skill names hidden from the agent. */
+  disabled_skills: string[];
+}
+
+/** An installed skill (Rust `SkillInfo`). */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  path: string;
+  project: boolean;
+  enabled: boolean;
+  /** Installed into ~/.agents/skills by `npx skills` (removable here). */
+  removable: boolean;
+}
+
+/** A skills.sh search hit. */
+export interface SkillSearchResult {
+  source: string;
+  skill: string;
+  installs: number;
 }
 
 export interface ProviderTestResult {
@@ -510,6 +530,10 @@ export const api = {
   terminalList: () => invoke<string[]>("terminal_list"),
   detectAgentClis: (commands: string[]) => invoke<boolean[]>("detect_agent_clis", { commands }),
   agentUsage: () => invoke<AgentUsageReport[]>("agent_usage"),
+  listSkills: () => invoke<SkillInfo[]>("list_skills"),
+  searchSkills: (query: string) => invoke<SkillSearchResult[]>("search_skills", { query }),
+  installSkill: (source: string, skill: string) => invoke<string>("install_skill", { source, skill }),
+  removeSkill: (name: string) => invoke<string>("remove_skill", { name }),
 
   // External agents (experimental)
   cliAgentPresets: () =>

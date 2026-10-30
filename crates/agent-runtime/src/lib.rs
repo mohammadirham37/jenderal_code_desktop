@@ -4,6 +4,7 @@
 pub mod context;
 pub mod executor;
 pub mod retry;
+pub mod skills;
 pub mod subagent;
 pub mod todo;
 pub mod web;
@@ -113,7 +114,7 @@ Do not attempt to modify anything — write access is disabled."
             allowed_tools: Some(vec![
                 "fs_read".into(), "fs_list".into(), "fs_search".into(), "glob_files".into(),
                 "git_status".into(), "git_diff".into(), "git_log".into(), "todo_write".into(), "web_fetch".into(),
-                "task".into(),
+                "task".into(), "skill".into(),
             ]),
             policy_mode: PolicyMode::Safe,
             provider_id: None,
@@ -149,7 +150,7 @@ Write access is disabled — investigate only. Report findings as a prioritized 
             allowed_tools: Some(vec![
                 "fs_read".into(), "fs_list".into(), "fs_search".into(), "glob_files".into(),
                 "terminal_run".into(), "git_status".into(), "git_diff".into(), "git_log".into(),
-                "todo_write".into(), "web_fetch".into(), "task".into(),
+                "todo_write".into(), "web_fetch".into(), "task".into(), "skill".into(),
             ]),
             policy_mode: PolicyMode::Safe,
             provider_id: None,
@@ -546,9 +547,25 @@ impl AgentRuntime {
         // ------------------------------------------------------------------
         // Persist the user message (with packed attachments).
         // ------------------------------------------------------------------
+        let settings = db.get_settings().unwrap_or_default();
+        let skills: Arc<Vec<skills::Skill>> = {
+            let root = ws.root().to_path_buf();
+            let disabled = settings.disabled_skills.clone();
+            Arc::new(
+                tokio::task::spawn_blocking(move || {
+                    let mut found = skills::discover(Some(&root), skills::home_dir().as_deref());
+                    found.retain(|s| !disabled.contains(&s.name));
+                    found
+                })
+                .await
+                .unwrap_or_default(),
+            )
+        };
         let packed = {
             let ws = ws.clone();
-            let content = content.to_string();
+            // `/skill-name ...` attaches the skill's instructions; the
+            // expanded text is what gets stored, so later turns keep it.
+            let content = skills::expand_slash_command(content, &skills).unwrap_or_else(|| content.to_string());
             let attachments = attachments.to_vec();
             tokio::task::spawn_blocking(move || context::pack_attachments(&ws, &content, &attachments))
                 .await
@@ -583,13 +600,14 @@ impl AgentRuntime {
         let system = {
             let profile = profile.clone();
             let ws = ws.clone();
-            tokio::task::spawn_blocking(move || context::build_system_prompt(&profile, &ws))
+            let skills = skills.clone();
+            tokio::task::spawn_blocking(move || context::build_system_prompt(&profile, &ws, &skills))
                 .await
                 .context("building system prompt")?
         };
         let checkpoints = CheckpointStore::new(&self.checkpoint_base).ok();
-        let settings = db.get_settings().unwrap_or_default();
-        let mut tool_ctx = executor::ToolContext::new(session_id, ws.clone(), checkpoints).with_files(files);
+        let mut tool_ctx =
+            executor::ToolContext::new(session_id, ws.clone(), checkpoints).with_files(files).with_skills(skills.clone());
         if settings.lsp_diagnostics {
             tool_ctx = tool_ctx.with_lsp(self.lsp.clone(), settings.lsp_auto_download);
         }

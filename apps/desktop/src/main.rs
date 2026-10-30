@@ -234,6 +234,10 @@ fn main() {
             commands::terminal_list,
             commands::detect_agent_clis,
             commands::agent_usage,
+            commands::list_skills,
+            commands::search_skills,
+            commands::install_skill,
+            commands::remove_skill,
             // External agents
             commands::cli_agent_presets,
             commands::run_external_agent,

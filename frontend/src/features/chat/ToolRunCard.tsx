@@ -9,6 +9,7 @@ import {
   FilePlus,
   FileSearch,
   FolderTree,
+  BookOpen,
   Bot,
   Globe,
   ListChecks,
@@ -31,6 +32,7 @@ const TOOL_META: Record<string, { icon: typeof FileEdit; label: string }> = {
   web_fetch: { icon: Globe, label: "Fetch" },
   todo_write: { icon: ListChecks, label: "Todos" },
   task: { icon: Bot, label: "Sub-agent" },
+  skill: { icon: BookOpen, label: "Skill" },
   fs_delete: { icon: Trash2, label: "Delete" },
   fs_list: { icon: FolderTree, label: "List directory" },
   fs_search: { icon: Search, label: "Search" },
@@ -74,7 +76,7 @@ export function ToolRunCard({
   const Icon = meta.icon;
   const visual = statusVisual(run.status);
   const pathArg = (run.args?.path as string) ?? null;
-  const cmdArg = ((run.args?.command ?? run.args?.url ?? run.args?.description) as string) ?? null;
+  const cmdArg = ((run.args?.command ?? run.args?.url ?? run.args?.description ?? run.args?.name) as string) ?? null;
   const todos = run.tool_name === "todo_write" && run.status === "success" ? parseTodos(run.args?.todos) : null;
 
   return (

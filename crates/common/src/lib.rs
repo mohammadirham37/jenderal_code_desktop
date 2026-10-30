@@ -499,6 +499,29 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
     .collect()
 }
 
+/// An installed skill, for the Skills settings and the `/` menu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkillInfo {
+    pub name: String,
+    pub description: String,
+    /// Folder containing `SKILL.md`.
+    pub path: String,
+    /// From the open project (not global).
+    pub project: bool,
+    pub enabled: bool,
+    /// Installed by `npx skills` into `~/.agents/skills` (can be removed here).
+    pub removable: bool,
+}
+
+/// A skills.sh search hit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkillSearchResult {
+    /// `owner/repo`.
+    pub source: String,
+    pub skill: String,
+    pub installs: u64,
+}
+
 /// State of one agent CLI's usage report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -595,6 +618,9 @@ pub struct AppSettings {
     /// Download missing language servers with `npx` when needed.
     #[serde(default = "default_true")]
     pub lsp_auto_download: bool,
+    /// Skill names hidden from the agent.
+    #[serde(default)]
+    pub disabled_skills: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -638,6 +664,7 @@ impl Default for AppSettings {
             agent_clis: default_agent_clis(),
             lsp_diagnostics: true,
             lsp_auto_download: true,
+            disabled_skills: Vec::new(),
         }
     }
 }

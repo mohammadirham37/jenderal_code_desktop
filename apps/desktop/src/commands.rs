@@ -985,6 +985,126 @@ pub fn terminal_list(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     Ok(state.terminals.list())
 }
 
+// ---------------------------------------------------------------------------
+// Skills (SKILL.md folders; skills.sh registry)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn list_skills(state: State<'_, AppState>) -> CmdResult<Vec<SkillInfo>> {
+    let root = state.active_root().ok();
+    let disabled = state.db.get_settings().map(|s| s.disabled_skills).unwrap_or_default();
+    blocking(move || {
+        let home = jcode_agent_runtime::skills::home_dir();
+        let managed = home.as_ref().map(|h| h.join(".agents/skills"));
+        Ok(jcode_agent_runtime::skills::discover(root.as_deref(), home.as_deref())
+            .into_iter()
+            .map(|s| SkillInfo {
+                enabled: !disabled.contains(&s.name),
+                removable: !s.project && managed.as_deref().is_some_and(|m| s.dir.parent() == Some(m)),
+                path: s.dir.display().to_string(),
+                name: s.name,
+                description: s.description,
+                project: s.project,
+            })
+            .collect())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn search_skills(query: String) -> CmdResult<Vec<SkillSearchResult>> {
+    let query = query.trim().to_string();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(err)?;
+    let v: serde_json::Value = client
+        .get("https://skills.sh/api/search")
+        .query(&[("q", query.as_str())])
+        .send()
+        .await
+        .map_err(|e| format!("skills.sh search failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("skills.sh search failed: {e}"))?;
+    Ok(v["skills"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            Some(SkillSearchResult {
+                source: s["source"].as_str()?.to_string(),
+                skill: s["skillId"].as_str().or(s["name"].as_str())?.to_string(),
+                installs: s["installs"].as_u64().unwrap_or(0),
+            })
+        })
+        .take(40)
+        .collect())
+}
+
+/// Names passed to the `skills` CLI through a shell must be plain.
+fn valid_skill_ref(s: &str, allow_slash: bool) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':') || (allow_slash && c == '/'))
+        && !s.starts_with(['-', '.'])
+        && (!allow_slash || s.matches('/').count() == 1)
+}
+
+async fn run_skills_cli(args: String) -> CmdResult<String> {
+    let home = jcode_agent_runtime::skills::home_dir().ok_or("home directory not found")?;
+    let spec = jcode_tool_terminal::ExecSpec::new(format!("npx --yes skills {args}"), home).with_timeout_ms(240_000);
+    let res = jcode_tool_terminal::run_exec(&spec, &jcode_tool_terminal::CancelToken::new())
+        .await
+        .map_err(err)?;
+    let output = strip_ansi(&res.output);
+    if res.success {
+        Ok(output)
+    } else {
+        Err(format!("skills CLI failed: {}", output.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n")))
+    }
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Install a skill from skills.sh into `~/.agents/skills` (`npx skills add
+/// <owner/repo> -s <skill> -g -a universal`).
+#[tauri::command]
+pub async fn install_skill(source: String, skill: String) -> CmdResult<String> {
+    if !valid_skill_ref(&source, true) || !valid_skill_ref(&skill, false) {
+        return Err("invalid skill source or name".into());
+    }
+    run_skills_cli(format!("add '{source}' -s '{skill}' -g -y -a universal")).await
+}
+
+#[tauri::command]
+pub async fn remove_skill(name: String) -> CmdResult<String> {
+    if !valid_skill_ref(&name, false) {
+        return Err("invalid skill name".into());
+    }
+    run_skills_cli(format!("remove '{name}' -g -y")).await
+}
+
 /// Subscription usage of external agent CLIs (Claude Code, Codex, ...).
 /// Blocking parts run in `spawn_blocking` inside `collect`.
 #[tauri::command]
@@ -1030,6 +1150,17 @@ fn _arc_guard(_: Arc<Db>) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_refs_are_validated_for_the_shell() {
+        assert!(valid_skill_ref("obra/superpowers", true));
+        assert!(valid_skill_ref("brainstorming", false));
+        for bad in ["obra/superpowers; rm -rf ~", "a/b/c", "'x'", "-g", "$(id)", "a b"] {
+            assert!(!valid_skill_ref(bad, true), "{bad}");
+        }
+        assert!(!valid_skill_ref("obra/x", false));
+        assert_eq!(strip_ansi("\u{1b}[1mBold\u{1b}[0m text"), "Bold text");
+    }
 
     #[test]
     fn workspace_root_rejects_dangerous_dirs() {

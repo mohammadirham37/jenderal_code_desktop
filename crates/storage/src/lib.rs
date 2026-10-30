@@ -21,6 +21,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("008_agent_bypass_args", include_str!("../migrations/008_agent_bypass_args.sql")),
     ("009_profile_new_tools", include_str!("../migrations/009_profile_new_tools.sql")),
     ("010_profile_task_tool", include_str!("../migrations/010_profile_task_tool.sql")),
+    ("011_profile_skill_tool", include_str!("../migrations/011_profile_skill_tool.sql")),
 ];
 
 pub struct Db {
@@ -1280,6 +1281,7 @@ mod tests {
             for sql in [
                 include_str!("../migrations/009_profile_new_tools.sql"),
                 include_str!("../migrations/010_profile_task_tool.sql"),
+                include_str!("../migrations/011_profile_skill_tool.sql"),
             ] {
                 c.execute_batch(sql)?;
                 c.execute_batch(sql)?;
@@ -1292,7 +1294,7 @@ mod tests {
                 .unwrap()
         };
         let plan: Vec<String> = serde_json::from_str(&tools("plan")).unwrap();
-        assert_eq!(plan, ["fs_read", "todo_write", "web_fetch", "task"]);
+        assert_eq!(plan, ["fs_read", "todo_write", "web_fetch", "task", "skill"]);
         assert_eq!(tools("custom"), "[\"fs_read\"]", "user profiles untouched");
     }
 

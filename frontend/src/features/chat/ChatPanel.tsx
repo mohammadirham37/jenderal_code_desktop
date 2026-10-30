@@ -30,6 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useChat } from "@/stores/chat";
+import { useSkills } from "@/stores/skills";
 import { useApp } from "@/stores/app";
 import { useEditor } from "@/stores/editor";
 import { useProviders } from "@/stores/providers";
@@ -111,6 +112,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slash = useSlashMenu(input, setInput);
 
   const session = chat.sessions.find((s) => s.id === chat.activeSessionId) ?? null;
   const busy = chat.status !== "idle";
@@ -333,7 +335,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
             <div className="mb-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-500">{notice}</div>
           )}
           <div
-            className={`rounded-md border border-neutral-300 bg-white transition-colors focus-within:border-accent-500 dark:border-neutral-700 dark:bg-neutral-925 ${
+            className={`relative rounded-md border border-neutral-300 bg-white transition-colors focus-within:border-accent-500 dark:border-neutral-700 dark:bg-neutral-925 ${
               full ? "shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)]" : ""
             }`}
           >
@@ -355,11 +357,13 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                 ))}
               </div>
             )}
+            {slash.menu}
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
+                if (slash.onKeyDown(e)) return;
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   void send();
@@ -883,6 +887,7 @@ const MessageBubble = memo(function MessageBubble({
   if (message.role === "user" && message.content.startsWith(COMPACTION_MARKER)) {
     return <SummaryCard content={message.content.slice(COMPACTION_MARKER.length).trim()} full={full} />;
   }
+  const skillUse = message.role === "user" ? parseSkillInvocation(message.content) : null;
   if (message.role === "user") {
     return (
       <div className={`group flex animate-rise flex-col ${full ? "mb-6 items-end" : "mb-4"}`}>
@@ -894,7 +899,16 @@ const MessageBubble = memo(function MessageBubble({
             full ? "max-w-[85%] text-[13px]" : "w-full text-xs"
           }`}
         >
-          {message.content}
+          {skillUse ? (
+            <>
+              <span className="mr-1.5 rounded-[3px] bg-accent-500/15 px-1 py-px font-mono text-[11px] text-accent-700 dark:text-accent-300">
+                /{skillUse.name}
+              </span>
+              {skillUse.request}
+            </>
+          ) : (
+            message.content
+          )}
         </div>
       </div>
     );
@@ -919,6 +933,85 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   );
 });
+
+/** A user message sent as `/skill ...` is stored with the skill's
+ *  instructions attached (see `skills::expand_slash_command`); show only the
+ *  command and the request. */
+function parseSkillInvocation(content: string): { name: string; request: string } | null {
+  const m = /^<skill name="([^"]+)"/.exec(content);
+  if (!m) return null;
+  const marker = "Follow its instructions for this request:\n";
+  const at = content.indexOf(marker);
+  if (at < 0) return null;
+  const request = content.slice(at + marker.length).split("\n\n--- Attached files ---")[0];
+  return { name: m[1], request: request.startsWith("(no further details given") ? "" : request };
+}
+
+/** `/` at the start of the composer lists the enabled skills; picking one
+ *  inserts `/name `. Returns the popup and a key handler for the textarea
+ *  (true when it handled the key). */
+function useSlashMenu(input: string, setInput: (v: string) => void) {
+  const skills = useSkills((s) => s.skills);
+  const [index, setIndex] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const query = /^\/([^\s]*)$/.exec(input)?.[1];
+  useEffect(() => {
+    if (query !== undefined && skills === null) void useSkills.getState().load();
+  }, [query, skills]);
+  const matches = useMemo(() => {
+    if (query === undefined || !skills) return [];
+    const q = query.toLowerCase();
+    return skills
+      .filter((s) => s.enabled && s.name.toLowerCase().includes(q))
+      .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)))
+      .slice(0, 8);
+  }, [query, skills]);
+  useEffect(() => setIndex(0), [query]);
+  const open = matches.length > 0 && dismissed !== input;
+  const pick = (name: string) => setInput(`/${name} `);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) return false;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setIndex((i) => (i + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
+      return true;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      pick(matches[index].name);
+      return true;
+    }
+    if (e.key === "Escape") {
+      setDismissed(input);
+      return true;
+    }
+    return false;
+  };
+
+  const menu = open ? (
+    <div className="animate-rise absolute bottom-full left-0 z-20 mb-1 w-full max-w-md overflow-hidden rounded-[6px] border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="eyebrow border-b border-neutral-200 px-2.5 py-1.5 dark:border-neutral-800">Skills</div>
+      {matches.map((s, i) => (
+        <button
+          key={s.name}
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            pick(s.name);
+          }}
+          onMouseEnter={() => setIndex(i)}
+          className={`block w-full px-2.5 py-1.5 text-left ${i === index ? "bg-accent-500/10" : ""}`}
+        >
+          <div className="font-mono text-[11.5px] text-neutral-900 dark:text-neutral-100">/{s.name}</div>
+          <div className="truncate text-[10.5px] text-neutral-500">{s.description}</div>
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  return { menu, onKeyDown };
+}
 
 /** Earlier turns were summarized to free context; the summary replaces them
  *  for the model (they stay visible above). */

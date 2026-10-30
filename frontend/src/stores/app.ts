@@ -72,6 +72,7 @@ export const useApp = create<AppState>((set, get) => ({
     agent_clis: [],
     lsp_diagnostics: true,
     lsp_auto_download: true,
+    disabled_skills: [],
   },
   paletteOpen: false,
   ready: false,
