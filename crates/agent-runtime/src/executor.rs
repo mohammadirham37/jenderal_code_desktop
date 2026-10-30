@@ -17,6 +17,10 @@ use std::sync::Arc;
 
 /// Cap for content sent back to the model per tool result.
 const MAX_RESULT_FOR_MODEL: usize = 100_000;
+/// Lines `fs_read` returns when no `limit` is given.
+const READ_DEFAULT_LIMIT: usize = 2_000;
+/// Longer lines (minified code, data) are cut in `fs_read` output.
+const READ_MAX_LINE_CHARS: usize = 2_000;
 
 #[derive(Clone)]
 pub struct ToolContext {
@@ -78,8 +82,14 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
     let mut specs = vec![
         spec(
             "fs_read",
-            "Read a text file from the workspace. Returns the full content.",
-            json!({"path": {"type": "string", "description": "File path relative to the workspace root (or absolute inside it)"}}),
+            "Read a text file from the workspace. Lines are numbered like `cat -n` (`<number>\\t<line>`); \
+             the number prefix is not part of the file. Returns up to 2000 lines; use offset/limit for \
+             long files. Read several files in one response when you need them.",
+            json!({
+                "path": {"type": "string", "description": "File path relative to the workspace root (or absolute inside it)"},
+                "offset": {"type": "integer", "description": "1-based line number to start from (default 1)"},
+                "limit": {"type": "integer", "description": "Maximum number of lines to return (default 2000)"}
+            }),
             &["path"],
         ),
         spec(
@@ -142,7 +152,7 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
         ));
         specs.push(spec(
             "fs_edit",
-            "Replace a string in a file. Always fs_read the file first and copy old_string from its CURRENT content (not from memory) — include 2-3 surrounding lines so it is unique. Small differences in indentation, trailing whitespace, line endings or quote style are tolerated; the match must still be unique unless replace_all is true. Prefer this over fs_write for small changes. On failure the error shows the most similar region of the file.",
+            "Replace a string in a file. Always fs_read the file first and copy old_string from its CURRENT content (not from memory), without the line-number prefix — include 2-3 surrounding lines so it is unique. Small differences in indentation, trailing whitespace, line endings or quote style are tolerated; the match must still be unique unless replace_all is true. Prefer this over fs_write for small changes. On failure the error shows the most similar region of the file.",
             json!({
                 "path": {"type": "string"},
                 "old_string": {"type": "string"},
@@ -327,6 +337,7 @@ pub fn preview(name: &str, args: &Value, ctx: &ToolContext) -> Option<String> {
             let new = get_str(args, "new_string").ok()?;
             let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
             let before = ctx.workspace.read_file(&path).ok()?;
+            let (old, new) = strip_copied_line_numbers(&before, old, new);
             match jcode_tool_filesystem::plan_edit(&before, &old, &new, replace_all, &path) {
                 Ok(p) => Some(jcode_tool_filesystem::unified_diff(&before, &p.after, &path)),
                 Err(e) => {
@@ -435,10 +446,16 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
         "fs_read" => {
             let path = get_str(args, "path")?;
             let content = ws.read_file(&path)?;
-            let lines = content.lines().count();
+            let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1).max(1) as usize;
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|l| l.max(1) as usize)
+                .unwrap_or(READ_DEFAULT_LIMIT);
+            let (body, shown) = numbered_lines(&path, &content, offset, limit)?;
             Ok(ToolOutcome {
-                summary: format!("Read {path} ({lines} lines)"),
-                result_for_model: truncate_for_model(&format!("--- {path} ---\n{content}")),
+                summary: format!("Read {path} ({shown})"),
+                result_for_model: truncate_for_model(&body),
                 diff: None,
             })
         }
@@ -511,6 +528,10 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
             let old = get_str(args, "old_string")?;
             let new = get_str(args, "new_string")?;
             let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (old, new) = match ws.read_file(&path) {
+                Ok(before) => strip_copied_line_numbers(&before, old, new),
+                Err(_) => (old, new),
+            };
             ctx.checkpoint(&path)?;
             let out = ws.edit_file(&path, &old, &new, replace_all)?;
             let fuzzy = out.strategy.filter(|s| *s != jcode_tool_filesystem::MatchStrategy::Exact);
@@ -589,6 +610,71 @@ fn execute_blocking(name: &str, args: &Value, ctx: &ToolContext) -> Result<ToolO
             })
         }
         other => bail!("unknown tool: {other}"),
+    }
+}
+
+/// `fs_read` output for lines `offset..offset+limit` (1-based) in `cat -n`
+/// style, plus a short description of the range for the UI summary.
+fn numbered_lines(path: &str, content: &str, offset: usize, limit: usize) -> Result<(String, String)> {
+    let total = content.lines().count();
+    if total == 0 {
+        return Ok((format!("--- {path} (empty file) ---"), "empty".into()));
+    }
+    if offset > total {
+        bail!("offset {offset} is past the end of {path} ({total} lines)");
+    }
+    let end = (offset - 1 + limit).min(total);
+    let mut out = format!("--- {path} (lines {offset}-{end} of {total}) ---\n");
+    for (i, line) in content.lines().enumerate().skip(offset - 1).take(end + 1 - offset) {
+        let line = match line.char_indices().nth(READ_MAX_LINE_CHARS) {
+            Some((cut, _)) => format!("{}… [line truncated]", &line[..cut]),
+            None => line.to_string(),
+        };
+        out.push_str(&format!("{:>6}\t{line}\n", i + 1));
+    }
+    if end < total {
+        out.push_str(&format!("(Showing lines {offset}-{end} of {total}. Use offset={} to read more.)\n", end + 1));
+    }
+    let shown = if offset == 1 && end == total {
+        format!("{total} lines")
+    } else {
+        format!("lines {offset}-{end} of {total}")
+    };
+    Ok((out, shown))
+}
+
+/// Remove a `fs_read` line-number prefix (`   12\t`) from `s` when every
+/// non-empty line has one.
+fn strip_line_number_prefix(s: &str) -> Option<String> {
+    let mut any = false;
+    let mut out = Vec::new();
+    for line in s.split('\n') {
+        if line.is_empty() {
+            out.push(line);
+            continue;
+        }
+        let rest = line.trim_start_matches(' ');
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let stripped = rest[digits..].strip_prefix('\t').filter(|_| digits > 0)?;
+        out.push(stripped);
+        any = true;
+    }
+    any.then(|| out.join("\n"))
+}
+
+/// Models sometimes paste `old_string`/`new_string` straight from `fs_read`
+/// output, line numbers included. If `old` is not in the file but its
+/// prefix-stripped form is, use the stripped strings.
+fn strip_copied_line_numbers(before: &str, old: String, new: String) -> (String, String) {
+    if before.contains(&old) {
+        return (old, new);
+    }
+    match strip_line_number_prefix(&old) {
+        Some(stripped) if before.contains(&stripped) => {
+            let new = strip_line_number_prefix(&new).unwrap_or(new);
+            (stripped, new)
+        }
+        _ => (old, new),
     }
 }
 
@@ -795,6 +881,59 @@ mod tests {
             let a = classify("fs_read", &json!({"path": "notes.txt"}), &c).unwrap();
             assert!(matches!(a, Action::ReadFile { sensitive: true, .. }), "symlink -> {a:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn fs_read_numbers_lines_and_pages() {
+        let (_t, c) = ctx();
+        let body: String = (1..=5).map(|i| format!("line {i}\n")).collect();
+        c.workspace.write_file("f.txt", &body).unwrap();
+        let read = |args: Value| {
+            let c = c.clone();
+            async move { execute("fs_read", &args, &c, &CancelToken::new()).await }
+        };
+        let out = read(json!({"path": "f.txt"})).await.unwrap();
+        assert!(out.result_for_model.starts_with("--- f.txt (lines 1-5 of 5) ---"));
+        assert!(out.result_for_model.contains("     1\tline 1\n"));
+        assert!(!out.result_for_model.contains("offset="));
+
+        let out = read(json!({"path": "f.txt", "offset": 2, "limit": 2})).await.unwrap();
+        assert!(out.result_for_model.contains("     2\tline 2"));
+        assert!(out.result_for_model.contains("     3\tline 3"));
+        assert!(!out.result_for_model.contains("line 4"));
+        assert!(out.result_for_model.contains("Use offset=4"));
+        assert_eq!(out.summary, "Read f.txt (lines 2-3 of 5)");
+
+        assert!(read(json!({"path": "f.txt", "offset": 9})).await.is_err());
+
+        c.workspace.write_file("long.txt", &"x".repeat(5_000)).unwrap();
+        let out = read(json!({"path": "long.txt"})).await.unwrap();
+        assert!(out.result_for_model.contains("[line truncated]"));
+        assert!(out.result_for_model.len() < 2_200);
+    }
+
+    #[tokio::test]
+    async fn fs_edit_accepts_old_string_copied_with_line_numbers() {
+        let (_t, c) = ctx();
+        c.workspace.write_file("a.rs", "fn a() {\n    1\n}\n").unwrap();
+        let args = json!({
+            "path": "a.rs",
+            "old_string": "     1\tfn a() {\n     2\t    1",
+            "new_string": "     1\tfn a() {\n     2\t    2",
+        });
+        assert!(preview("fs_edit", &args, &c).unwrap().contains("+    2"));
+        execute("fs_edit", &args, &c, &CancelToken::new()).await.unwrap();
+        assert_eq!(c.workspace.read_file("a.rs").unwrap(), "fn a() {\n    2\n}\n");
+    }
+
+    #[test]
+    fn line_number_prefix_is_only_stripped_when_every_line_has_one() {
+        assert_eq!(strip_line_number_prefix("  12\tfoo\n  13\tbar").as_deref(), Some("foo\nbar"));
+        assert_eq!(strip_line_number_prefix("  12\tfoo\nbar"), None);
+        assert_eq!(strip_line_number_prefix("foo"), None);
+        // Text that is really in the file is never rewritten.
+        let (old, _) = strip_copied_line_numbers("1\tid", "1\tid".into(), String::new());
+        assert_eq!(old, "1\tid");
     }
 
     #[test]
