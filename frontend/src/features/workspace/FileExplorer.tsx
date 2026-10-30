@@ -22,7 +22,7 @@ import { languageOf } from "@/lib/format";
 import { IconButton } from "@/components/ui";
 
 function iconFor(name: string, isDir: boolean) {
-  if (isDir) return <FolderIcon size={13} className="text-indigo-400" />;
+  if (isDir) return <FolderIcon size={13} className="text-accent-600 dark:text-accent-400" />;
   const lang = languageOf(name);
   if (["json"].includes(lang)) return <FileJson size={13} className="text-amber-400" />;
   if (["typescript", "tsx", "javascript", "jsx", "rust", "python"].includes(lang))
@@ -84,7 +84,7 @@ export function FileExplorer() {
           <div key={key}>
             <button
               className={`group flex w-full items-center gap-1 rounded px-1 py-[3px] text-left text-xs hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 ${
-                selected === key ? "bg-indigo-500/10" : ""
+                selected === key ? "bg-accent-500/10" : ""
               }`}
               style={{ paddingLeft: depth * 12 + 4 }}
               onClick={() => {
@@ -109,7 +109,7 @@ export function FileExplorer() {
         <button
           key={key}
           className={`flex w-full items-center gap-1 rounded px-1 py-[3px] text-left text-xs hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 ${
-            selected === key ? "bg-indigo-500/10" : ""
+            selected === key ? "bg-accent-500/10" : ""
           }`}
           style={{ paddingLeft: depth * 12 + 18 }}
           onClick={() => {
@@ -150,7 +150,7 @@ export function FileExplorer() {
             title={showHidden ? "Hide hidden files" : "Show hidden files"}
             aria-pressed={showHidden}
             onClick={() => void useApp.getState().updateSettings({ show_hidden_files: !showHidden })}
-            className={`h-6 w-6 ${showHidden ? "text-indigo-400" : ""}`}
+            className={`h-6 w-6 ${showHidden ? "text-accent-600 dark:text-accent-400" : ""}`}
           >
             {showHidden ? <Eye size={12} /> : <EyeOff size={12} />}
           </IconButton>

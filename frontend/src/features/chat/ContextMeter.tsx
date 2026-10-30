@@ -64,8 +64,8 @@ export function ContextMeter() {
   const pct = Math.min(100, (used / ctxWindow.tokens) * 100);
   const pctLabel = pct > 0 && pct < 1 ? "<1%" : `${Math.round(pct)}%`;
 
-  const tone = pct >= 85 ? "text-red-500" : pct >= 60 ? "text-amber-500" : "text-indigo-400";
-  const stroke = pct >= 85 ? "#ef4444" : pct >= 60 ? "#f59e0b" : "#818cf8";
+  const tone = pct >= 85 ? "text-red-500" : pct >= 60 ? "text-amber-500" : "text-accent-600 dark:text-accent-400";
+  const stroke = pct >= 85 ? "#ef4444" : pct >= 60 ? "#f59e0b" : "#2fc3a5";
   const r = 6;
   const circ = 2 * Math.PI * r;
 
@@ -98,7 +98,7 @@ export function ContextMeter() {
         {total > 0 && <span className="hidden tabular-nums sm:inline">· {formatTokens(total)} tok</span>}
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 z-40 mb-1 w-64 rounded-lg border border-neutral-200 bg-white p-3 text-[11px] shadow-xl dark:border-neutral-700 dark:bg-[#15171d]">
+        <div className="absolute bottom-full right-0 z-40 mb-1 w-64 rounded-md border border-neutral-200 bg-white p-3 text-[11px] shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
           <div className="mb-1.5 flex items-center justify-between font-semibold">
             <span>Context window</span>
             <span className={tone}>{pctLabel}</span>

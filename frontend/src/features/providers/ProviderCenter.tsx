@@ -93,9 +93,9 @@ export function ProviderCenter() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200 px-4 dark:border-neutral-800">
-        <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <Plug size={15} className="text-indigo-400" /> Provider Center
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-4 dark:border-neutral-800">
+        <h1 className="flex items-center gap-2.5 font-display text-[19px] font-semibold tracking-tight">
+          <Plug size={16} className="text-accent-500" /> Provider Center
         </h1>
         <Button
           variant="primary"
@@ -126,14 +126,14 @@ export function ProviderCenter() {
             return (
               <div
                 key={p.id}
-                className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800"
+                className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"
               >
                 <div className="mb-2 flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
                     {p.kind === "mock" ? (
                       <Cpu size={15} className="text-emerald-400" />
                     ) : (
-                      <Server size={15} className="text-indigo-400" />
+                      <Server size={15} className="text-accent-600 dark:text-accent-400" />
                     )}
                     <div>
                       <div className="flex items-center gap-2 text-sm font-medium">
@@ -288,7 +288,7 @@ export function ProviderCenter() {
                     }}
                     className={`rounded-md border px-2 py-1 text-[11px] ${
                       editing.name === preset.label
-                        ? "border-indigo-500 bg-indigo-500/10 text-indigo-400"
+                        ? "border-accent-500 bg-accent-500/10 text-accent-600 dark:text-accent-400"
                         : "border-neutral-300 hover:border-neutral-400 dark:border-neutral-700"
                     }`}
                   >
@@ -361,7 +361,7 @@ function ModelRow({ model, onDelete }: { model: ModelInfo; onDelete: () => void 
     <div className="group flex items-center gap-2 px-1 py-1 text-[11px]">
       <RefreshCw size={9} className={model.custom ? "text-amber-400" : "text-neutral-600"} />
       <span className="min-w-0 flex-1 truncate font-mono">{model.name}</span>
-      {caps.tool_calling && <Badge tone="indigo">tools</Badge>}
+      {caps.tool_calling && <Badge tone="accent">tools</Badge>}
       {caps.vision && <Badge tone="blue">vision</Badge>}
       {model.custom && <Badge tone="amber">custom</Badge>}
       <button

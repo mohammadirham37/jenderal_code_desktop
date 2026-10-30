@@ -28,7 +28,7 @@ export function DiffView({ diff, title }: { diff: string; title: string }) {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-1.5 dark:border-neutral-800">
         <div className="flex items-center gap-2 text-xs">
-          <FileDiff size={13} className="text-indigo-400" />
+          <FileDiff size={13} className="text-accent-600 dark:text-accent-400" />
           <span className="font-medium">{title}</span>
           <span className="text-emerald-500">+{totalAdd}</span>
           <span className="text-red-500">−{totalDel}</span>
@@ -40,7 +40,7 @@ export function DiffView({ diff, title }: { diff: string; title: string }) {
       <div className="min-h-0 flex-1 overflow-auto">
         {files.map((f) => (
           <div key={f.path} className="border-b border-neutral-200 last:border-b-0 dark:border-neutral-800">
-            <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs dark:border-neutral-800 dark:bg-[#101218]">
+            <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs dark:border-neutral-800 dark:bg-neutral-925">
               <span className="font-mono">{f.path}</span>
               {f.binary && <span className="text-neutral-500">(binary)</span>}
               <span className="text-emerald-500">+{f.additions}</span>

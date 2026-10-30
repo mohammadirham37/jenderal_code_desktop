@@ -253,7 +253,7 @@ export function GitPanel() {
                 }
               }}
               className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 ${
-                b.current ? "text-indigo-400" : ""
+                b.current ? "text-accent-600 dark:text-accent-400" : ""
               }`}
             >
               <GitBranch size={11} />

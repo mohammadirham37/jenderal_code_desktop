@@ -18,6 +18,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { Welcome } from "@/features/welcome/Welcome";
 import { WorkspacePage } from "@/features/workspace/WorkspacePage";
 import { Spinner } from "@/components/ui";
+import { Logo } from "@/components/Logo";
 
 // Secondary views load on demand to keep the startup bundle small.
 const named = <K extends string>(p: Promise<Record<K, React.ComponentType>>, k: K) =>
@@ -105,16 +106,17 @@ function AppShell() {
   }, []);
 
   return (
-    <div className="flex h-full w-full">
+    <div className="grain flex h-full w-full">
       {/* Sidebar */}
-      <aside className="flex w-14 flex-col items-center justify-between border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-[#101218] py-3">
+      <aside className="flex w-14 flex-col items-center justify-between border-r border-neutral-200 bg-neutral-100 py-3 dark:border-neutral-800 dark:bg-neutral-925">
         <div className="flex flex-col items-center gap-1">
-          <div
-            title="JenderalCode"
-            className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 font-bold text-white shadow"
+          <button
+            title="JenderalCode — projects"
+            onClick={() => useApp.getState().setView("welcome")}
+            className="mb-3 transition-transform hover:-rotate-3"
           >
-            J
-          </div>
+            <Logo size={30} />
+          </button>
           {NAV.map((item) => {
             const disabled = item.needsWorkspace && !workspace;
             const active = view === item.view;
@@ -127,15 +129,15 @@ function AppShell() {
                 aria-current={active ? "page" : undefined}
                 disabled={disabled}
                 onClick={() => useApp.getState().setView(item.view)}
-                className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                className={`relative flex h-9 w-9 items-center justify-center rounded-[5px] transition-colors ${
                   active
-                    ? "bg-indigo-500/15 text-indigo-500"
+                    ? "bg-white text-accent-600 shadow-[inset_0_0_0_1px_var(--color-neutral-300)] dark:bg-neutral-850 dark:text-accent-400 dark:shadow-[inset_0_0_0_1px_var(--color-neutral-700)]"
                     : disabled
                       ? "text-neutral-300 dark:text-neutral-700"
-                      : "text-neutral-500 hover:bg-neutral-200/70 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                      : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-500 dark:hover:text-neutral-100"
                 }`}
               >
-                {active && <span className="absolute -left-2.5 h-5 w-0.5 rounded-r bg-indigo-500" />}
+                {active && <span className="absolute -left-[9px] h-4 w-[3px] bg-accent-500" />}
                 <Icon size={17} />
               </button>
             );
@@ -146,7 +148,7 @@ function AppShell() {
           onClick={() =>
             useApp.getState().updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" })
           }
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-200/70 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          className="flex h-8 w-8 items-center justify-center rounded-[5px] text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
         >
           {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -177,7 +179,7 @@ function AppShell() {
         <button
           onClick={() => void useApp.getState().resetZoom()}
           title={`Zoom ${Math.round(zoom * 100)}% — click or press ${isMac ? "⌘0" : "Ctrl+0"} to reset`}
-          className="fixed bottom-3 right-3 z-40 rounded-full border border-neutral-300 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-neutral-600 shadow-md backdrop-blur transition-colors hover:border-indigo-400 hover:text-indigo-500 dark:border-neutral-700 dark:bg-[#15171d]/90 dark:text-neutral-300"
+          className="fixed bottom-3 right-3 z-40 rounded-[4px] border border-neutral-300 bg-white/90 px-2 py-0.5 font-mono text-[10px] text-neutral-600 backdrop-blur transition-colors hover:border-accent-500 hover:text-accent-600 dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-300"
         >
           {Math.round(zoom * 100)}%
         </button>

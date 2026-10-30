@@ -3,9 +3,64 @@
 /* Class-based dark mode (toggled on <html>). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-:root {
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+/* ------------------------------------------------------------------------
+   Design tokens — "field instrument": green-tinted graphite surfaces, one
+   phosphor-teal accent, mono labels. The neutral scale is overridden so
+   every existing `neutral-*` utility picks up the tint.
+   ------------------------------------------------------------------------ */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-display: "Bricolage Grotesque Variable", "IBM Plex Sans", sans-serif;
+
+  --color-accent-50: #ebfcf7;
+  --color-accent-100: #cdf6ea;
+  --color-accent-200: #9eecd7;
+  --color-accent-300: #62dbbf;
+  --color-accent-400: #2fc3a5;
+  --color-accent-500: #13a68b;
+  --color-accent-600: #0b8672;
+  --color-accent-700: #0d6b5c;
+  --color-accent-800: #10554b;
+  --color-accent-900: #11463e;
+  --color-accent-950: #032924;
+
+  --color-neutral-50: #f5f7f6;
+  --color-neutral-100: #eaeeec;
+  --color-neutral-200: #d6ddda;
+  --color-neutral-300: #b5c0bc;
+  --color-neutral-400: #8b9893;
+  --color-neutral-500: #67746f;
+  --color-neutral-600: #4e5954;
+  --color-neutral-700: #39433f;
+  --color-neutral-800: #252d2a;
+  --color-neutral-850: #1c2220;
+  --color-neutral-900: #151a18;
+  --color-neutral-925: #111513;
+  --color-neutral-950: #0c0f0e;
+
+  --animate-rise: rise 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-fade: fade 260ms ease-out both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 html,
@@ -13,22 +68,33 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  font-family: var(--font-ui);
+  font-family: var(--font-sans);
   font-size: 13px;
   overflow: hidden;
 }
 
 body {
   @apply bg-neutral-100 text-neutral-900 antialiased;
+  font-feature-settings: "ss02", "tnum" 0;
 }
 
 .dark body {
-  @apply bg-[#0d0f14] text-neutral-200;
+  @apply bg-neutral-950 text-neutral-200;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent-400) 35%, transparent);
+}
+
+/* Focus rings: teal, crisp, never blurry glows. */
+:focus-visible {
+  outline: 1.5px solid var(--color-accent-500);
+  outline-offset: 1px;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(128, 128, 128, 0.35) transparent;
+  scrollbar-color: color-mix(in oklab, var(--color-neutral-500) 45%, transparent) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -37,15 +103,102 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.35);
-  border-radius: 4px;
+  background: color-mix(in oklab, var(--color-neutral-500) 45%, transparent);
+  border-radius: 0;
 }
 
 *::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Markdown inside chat bubbles */
+/* ------------------------------------------------------------------------
+   Instrument details
+   ------------------------------------------------------------------------ */
+
+/* Mono, spaced, uppercase micro-labels ("01 · RECENT"). */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  @apply text-neutral-500;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+}
+
+/* Faint dot grid for empty canvases. */
+.dot-grid {
+  background-image: radial-gradient(
+    color-mix(in oklab, var(--color-neutral-500) 28%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 14px 14px;
+  background-position: -7px -7px;
+}
+
+/* Film grain over the whole app — breaks up flat fills without color. */
+.grain::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* Corner ticks, like crop marks on an instrument panel. */
+.ticks {
+  position: relative;
+}
+.ticks::before,
+.ticks::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  pointer-events: none;
+  border-color: var(--color-accent-500);
+  opacity: 0.9;
+}
+.ticks::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1.5px solid;
+  border-left: 1.5px solid;
+}
+.ticks::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1.5px solid;
+  border-right: 1.5px solid;
+}
+
+/* Staggered entrance for lists: set --i on each child. */
+.stagger > * {
+  animation: var(--animate-rise);
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* ------------------------------------------------------------------------
+   Markdown inside chat
+   ------------------------------------------------------------------------ */
 .md {
   @apply text-[13px] leading-relaxed;
 }
@@ -57,6 +210,8 @@ body {
 .md h3,
 .md h4 {
   @apply mt-4 mb-2 font-semibold;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 .md h1 {
   @apply text-base;
@@ -73,24 +228,33 @@ body {
 .md li {
   @apply my-0.5;
 }
+.md li::marker {
+  color: var(--color-accent-500);
+}
 .md a {
-  @apply text-indigo-400 underline underline-offset-2;
+  @apply text-accent-600 underline decoration-accent-500/40 underline-offset-2 dark:text-accent-300;
 }
 .md code {
-  @apply font-mono text-[12px] bg-neutral-200/70 dark:bg-neutral-800 rounded px-1 py-0.5;
+  @apply font-mono text-[12px] bg-neutral-200/70 dark:bg-neutral-800 rounded-[3px] px-1 py-0.5;
+}
+.md pre {
+  @apply my-2 overflow-x-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-925;
 }
 .md pre code {
   @apply bg-transparent p-0;
 }
 .md blockquote {
-  @apply border-l-2 border-neutral-400 pl-3 my-2 text-neutral-500;
+  @apply border-l-2 border-accent-500/60 pl-3 my-2 text-neutral-500;
 }
 .md table {
-  @apply my-2 border-collapse;
+  @apply my-2 border-collapse text-[12px];
 }
 .md th,
 .md td {
   @apply border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-left;
+}
+.md th {
+  @apply font-mono text-[10px] uppercase tracking-wider text-neutral-500;
 }
 .md hr {
   @apply my-3 border-neutral-300 dark:border-neutral-700;

@@ -12,12 +12,14 @@ export function Button({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: "sm" | "md" }) {
   const base =
-    "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60";
+    "inline-flex items-center justify-center gap-1.5 rounded-[5px] font-medium tracking-[0.01em] transition-[background-color,color,border-color,transform] duration-150 active:translate-y-px disabled:opacity-45 disabled:pointer-events-none";
   const sizes = size === "sm" ? "text-[11px] px-2 py-1" : "text-xs px-3 py-1.5";
   const variants: Record<ButtonVariant, string> = {
-    primary: "bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm",
+    // Teal with ink-dark text: reads as a lit indicator, not a glossy CTA.
+    primary:
+      "bg-accent-600 text-white hover:bg-accent-700 dark:bg-accent-400 dark:text-neutral-950 dark:hover:bg-accent-300",
     secondary:
-      "bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200",
+      "border border-neutral-300 bg-white hover:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600 text-neutral-800 dark:text-neutral-200",
     ghost:
       "hover:bg-neutral-200/70 dark:hover:bg-neutral-800/70 text-neutral-600 dark:text-neutral-300",
     danger: "bg-red-600 hover:bg-red-500 text-white",
@@ -37,7 +39,7 @@ export function IconButton({
 }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-200/70 dark:text-neutral-400 dark:hover:bg-neutral-800/70 transition-colors focus:outline-none ${className}`}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-[5px] text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 disabled:opacity-40 disabled:pointer-events-none dark:text-neutral-400 dark:hover:bg-neutral-800/70 dark:hover:text-neutral-100 ${className}`}
       {...rest}
     >
       {children}
@@ -48,7 +50,7 @@ export function IconButton({
 export function Spinner({ className = "" }: { className?: string }) {
   return (
     <span
-      className={`inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent ${className}`}
+      className={`inline-block h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent ${className}`}
     />
   );
 }
@@ -58,7 +60,7 @@ export function Badge({
   tone = "neutral",
 }: {
   children: ReactNode;
-  tone?: "neutral" | "green" | "red" | "amber" | "indigo" | "blue";
+  tone?: "neutral" | "green" | "red" | "amber" | "accent" | "blue";
 }) {
   const tones: Record<string, string> = {
     neutral:
@@ -66,12 +68,12 @@ export function Badge({
     green: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
     red: "bg-red-500/15 text-red-600 dark:text-red-400",
     amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    indigo: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
+    accent: "bg-accent-500/15 text-accent-600 dark:text-accent-400",
     blue: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
   };
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${tones[tone]}`}
+      className={`inline-flex items-center gap-1 rounded-[3px] px-1.5 py-px font-mono text-[9.5px] font-medium uppercase tracking-wider ${tones[tone]}`}
     >
       {children}
     </span>
@@ -93,12 +95,12 @@ export function Modal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex animate-fade items-center justify-center bg-neutral-950/60 p-4 backdrop-blur-[2px]">
       <div
-        className={`max-h-[85vh] w-full ${wide ? "max-w-3xl" : "max-w-lg"} overflow-hidden rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#15171d] shadow-2xl flex flex-col`}
+        className={`ticks max-h-[85vh] w-full animate-rise ${wide ? "max-w-3xl" : "max-w-lg"} flex flex-col overflow-hidden rounded-md border border-neutral-300 bg-white shadow-[0_24px_60px_-20px_rgba(0,0,0,0.6)] dark:border-neutral-700 dark:bg-neutral-900`}
       >
         <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-4 py-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="font-display text-[15px] font-semibold">{title}</h2>
           <IconButton onClick={onClose} aria-label="Close">
             <X size={14} />
           </IconButton>
@@ -120,7 +122,7 @@ export function Field({
 }) {
   return (
     <label className="mb-3 block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+      <span className="eyebrow mb-1.5 block">
         {label}
       </span>
       {children}
@@ -130,7 +132,7 @@ export function Field({
 }
 
 export const inputClass =
-  "w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0d0f14] px-2.5 py-1.5 text-xs text-neutral-900 dark:text-neutral-200 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50";
+  "w-full rounded-[5px] border border-neutral-300 bg-white px-2.5 py-1.5 text-xs text-neutral-900 placeholder-neutral-400 transition-colors focus:border-accent-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200";
 
 export function EmptyState({
   icon,
@@ -144,9 +146,13 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-      {icon && <div className="text-neutral-400 dark:text-neutral-600">{icon}</div>}
-      <div className="text-sm font-medium text-neutral-600 dark:text-neutral-300">{title}</div>
+    <div className="dot-grid flex h-full animate-fade flex-col items-center justify-center gap-2 p-8 text-center">
+      {icon && (
+        <div className="ticks mb-1 flex h-11 w-11 items-center justify-center border border-neutral-300 bg-neutral-100 text-neutral-500 dark:border-neutral-800 dark:bg-neutral-925">
+          {icon}
+        </div>
+      )}
+      <div className="font-display text-[15px] font-semibold text-neutral-700 dark:text-neutral-200">{title}</div>
       {hint && <div className="max-w-sm text-xs text-neutral-500">{hint}</div>}
       {action && <div className="mt-2">{action}</div>}
     </div>
@@ -169,7 +175,7 @@ export function Toggle({
       className="inline-flex items-center gap-2"
     >
       <span
-        className={`relative h-4.5 w-8 rounded-full transition-colors ${checked ? "bg-indigo-600" : "bg-neutral-300 dark:bg-neutral-700"}`}
+        className={`relative h-4.5 w-8 rounded-full transition-colors ${checked ? "bg-accent-500" : "bg-neutral-300 dark:bg-neutral-700"}`}
         style={{ height: 18, width: 32 }}
       >
         <span

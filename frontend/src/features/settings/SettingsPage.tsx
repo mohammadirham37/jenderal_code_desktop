@@ -73,9 +73,9 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center border-b border-neutral-200 px-4 dark:border-neutral-800">
-        <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <Palette size={15} className="text-indigo-400" /> Usage &amp; Settings
+      <div className="flex h-14 shrink-0 items-center border-b border-neutral-200 px-4 dark:border-neutral-800">
+        <h1 className="flex items-center gap-2.5 font-display text-[19px] font-semibold tracking-tight">
+          <Palette size={16} className="text-accent-500" /> Usage &amp; Settings
         </h1>
       </div>
 
@@ -95,7 +95,7 @@ export function SettingsPage() {
                   <StatCard label="Sessions" value={String(usage.sessions)} />
                 </div>
                 {usage.by_day.length > 0 && (
-                  <div className="mb-4 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+                  <div className="mb-4 rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
                     <div className="mb-2 text-[11px] font-medium text-neutral-500">
                       Tokens per day (last 30 days)
                     </div>
@@ -106,7 +106,7 @@ export function SettingsPage() {
                           <div
                             key={d.day}
                             title={`${d.day}: ${formatTokens(total)} in+out${d.cost_estimate ? ` · ${formatCost(d.cost_estimate)}` : ""}`}
-                            className="min-w-2 flex-1 rounded-t bg-gradient-to-t from-indigo-600/70 to-violet-500/70"
+                            className="min-w-2 flex-1 bg-accent-500/75 transition-colors hover:bg-accent-400"
                             style={{ height: `${(total / maxDay) * 100}%` }}
                           />
                         );
@@ -115,7 +115,7 @@ export function SettingsPage() {
                   </div>
                 )}
                 {usage.by_provider.length > 0 && (
-                  <div className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+                  <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
                     <div className="mb-2 text-[11px] font-medium text-neutral-500">By provider</div>
                     {usage.by_provider.map((p) => (
                       <div key={p.provider_id} className="flex items-center justify-between py-1 text-xs">
@@ -260,7 +260,7 @@ export function SettingsPage() {
             <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
               <Keyboard size={13} /> Keyboard shortcuts
             </h2>
-            <div className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+            <div className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
               {SHORTCUTS.map(([k, v]) => (
                 <div key={k} className="flex items-center justify-between py-1 text-xs">
                   <span className="text-neutral-500">{v}</span>
@@ -277,7 +277,7 @@ export function SettingsPage() {
             <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
               <Database size={13} /> Privacy &amp; data
             </h2>
-            <div className="space-y-3 rounded-xl border border-neutral-200 p-4 text-xs leading-relaxed text-neutral-500 dark:border-neutral-800">
+            <div className="space-y-3 rounded-md border border-neutral-200 p-4 text-xs leading-relaxed text-neutral-500 dark:border-neutral-800">
               <p className="flex gap-2">
                 <EyeOff size={14} className="mt-0.5 shrink-0" />
                 <span>
@@ -400,7 +400,7 @@ export function SettingsPage() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+    <div className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
       <div className="text-[10px] font-medium uppercase tracking-wide text-neutral-500">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>

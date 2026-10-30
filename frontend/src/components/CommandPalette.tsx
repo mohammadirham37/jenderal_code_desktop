@@ -129,7 +129,7 @@ export function CommandPalette() {
       onClick={() => setPaletteOpen(false)}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#15171d] shadow-2xl"
+        className="ticks w-full max-w-lg animate-rise overflow-hidden rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -157,7 +157,7 @@ export function CommandPalette() {
               onClick={() => runCommand(c)}
               onMouseEnter={() => setSelected(i)}
               className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs ${
-                i === selected ? "bg-indigo-500/10 text-indigo-500 dark:text-indigo-300" : ""
+                i === selected ? "bg-accent-500/10 text-accent-500 dark:text-accent-300" : ""
               }`}
             >
               <span>{c.label}</span>

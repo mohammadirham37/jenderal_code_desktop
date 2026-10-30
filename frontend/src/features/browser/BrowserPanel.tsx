@@ -113,7 +113,7 @@ export function BrowserPanel({ id }: { id: string }) {
   const action = (a: "back" | "forward" | "reload" | "stop") => void api.browserAction(id, a).catch(() => {});
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-[#0d0f14]">
+    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-neutral-950">
       <form
         className="flex h-9 shrink-0 items-center gap-0.5 border-b border-neutral-200 px-1.5 dark:border-neutral-800"
         onSubmit={(e) => {
@@ -138,7 +138,7 @@ export function BrowserPanel({ id }: { id: string }) {
         </IconButton>
         <div className="relative mx-1 min-w-0 flex-1">
           {loading ? (
-            <Loader2 size={11} className="absolute left-2 top-1/2 -translate-y-1/2 animate-spin text-indigo-400" />
+            <Loader2 size={11} className="absolute left-2 top-1/2 -translate-y-1/2 animate-spin text-accent-600 dark:text-accent-400" />
           ) : (
             <Globe size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-400" />
           )}
@@ -149,7 +149,7 @@ export function BrowserPanel({ id }: { id: string }) {
             onFocus={(e) => e.target.select()}
             placeholder="localhost:3000 or https://…"
             spellCheck={false}
-            className="w-full rounded-md border border-neutral-200 bg-neutral-50 py-1 pl-6 pr-2 font-mono text-[11px] focus:border-indigo-500/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-neutral-800 dark:bg-[#101218]"
+            className="w-full rounded-md border border-neutral-200 bg-neutral-50 py-1 pl-6 pr-2 font-mono text-[11px] focus:border-accent-500/60 focus:outline-none focus:ring-2 focus:ring-accent-500/20 dark:border-neutral-800 dark:bg-neutral-925"
           />
         </div>
         <IconButton
@@ -175,7 +175,7 @@ export function BrowserPanel({ id }: { id: string }) {
                 <button
                   key={q}
                   onClick={() => void open(q)}
-                  className="rounded-md border border-neutral-200 px-2 py-1 font-mono text-[11px] text-neutral-600 hover:border-indigo-400/60 hover:text-indigo-500 dark:border-neutral-800 dark:text-neutral-300"
+                  className="rounded-md border border-neutral-200 px-2 py-1 font-mono text-[11px] text-neutral-600 hover:border-accent-400/60 hover:text-accent-500 dark:border-neutral-800 dark:text-neutral-300"
                 >
                   {q}
                 </button>

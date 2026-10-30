@@ -142,14 +142,14 @@ export function EditorPane() {
                 onClick={() => setActive(keyOf(t))}
                 className={`group flex cursor-pointer items-center gap-1.5 border-r border-neutral-200 px-3 text-xs dark:border-neutral-800 ${
                   isActive
-                    ? "border-b-2 border-b-indigo-500 bg-neutral-100 dark:bg-[#15171d]"
+                    ? "border-b-2 border-b-accent-500 bg-neutral-100 dark:bg-neutral-900"
                     : "hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40"
                 }`}
               >
                 {t.kind === "file" && t.dirty && <Circle size={7} className="fill-amber-400 text-amber-400" />}
                 <span className={isActive ? "font-medium" : "text-neutral-500"}>{title}</span>
                 {t.kind === "diff" && (
-                  <span className="rounded bg-indigo-500/15 px-1 text-[9px] font-semibold text-indigo-500">
+                  <span className="rounded bg-accent-500/15 px-1 text-[9px] font-semibold text-accent-500">
                     DIFF
                   </span>
                 )}
@@ -179,7 +179,7 @@ export function EditorPane() {
             {langMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setLangMenu(false)} />
-                <div className="absolute right-1 top-8 z-40 max-h-72 w-40 overflow-y-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-[#15171d]">
+                <div className="absolute right-1 top-8 z-40 max-h-72 w-40 overflow-y-auto rounded-md border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900">
                   {LANGUAGES.map((l) => (
                     <button
                       key={l}
@@ -188,7 +188,7 @@ export function EditorPane() {
                         setLangMenu(false);
                       }}
                       className={`flex w-full px-3 py-1.5 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                        l === activeLang ? "text-indigo-400" : ""
+                        l === activeLang ? "text-accent-600 dark:text-accent-400" : ""
                       }`}
                     >
                       {l === "text" ? "Plain Text" : l}

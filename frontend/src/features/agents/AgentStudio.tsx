@@ -62,9 +62,9 @@ export function AgentStudio() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200 px-4 dark:border-neutral-800">
-        <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <Bot size={15} className="text-indigo-400" /> Agent Studio
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-4 dark:border-neutral-800">
+        <h1 className="flex items-center gap-2.5 font-display text-[19px] font-semibold tracking-tight">
+          <Bot size={16} className="text-accent-500" /> Agent Studio
         </h1>
         <Button
           variant="primary"
@@ -84,10 +84,10 @@ export function AgentStudio() {
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {profiles.map((p) => (
-            <div key={p.id} className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+            <div key={p.id} className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
               <div className="mb-1.5 flex items-center gap-2">
                 <span className="text-sm font-medium">{p.name}</span>
-                <Badge tone={p.mode === "build" ? "indigo" : p.mode === "plan" ? "blue" : p.mode === "review" ? "amber" : "neutral"}>
+                <Badge tone={p.mode === "build" ? "accent" : p.mode === "plan" ? "blue" : p.mode === "review" ? "amber" : "neutral"}>
                   {p.mode}
                 </Badge>
                 {p.built_in && (
@@ -196,7 +196,7 @@ export function AgentStudio() {
                       }}
                       className={`rounded-md border px-2 py-1 font-mono text-[10px] ${
                         checked
-                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-400"
+                          ? "border-accent-500 bg-accent-500/10 text-accent-600 dark:text-accent-400"
                           : "border-neutral-300 text-neutral-500 dark:border-neutral-700"
                       }`}
                     >

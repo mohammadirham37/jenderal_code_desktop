@@ -224,7 +224,7 @@ export function ChangesPanel({ onOpen }: { onOpen: () => void }) {
                   {c.path}
                 </span>
                 {c.byAgent && (
-                  <span title="Changed by the agent in this conversation" className="shrink-0 text-indigo-400">
+                  <span title="Changed by the agent in this conversation" className="shrink-0 text-accent-600 dark:text-accent-400">
                     <Bot size={11} />
                   </span>
                 )}

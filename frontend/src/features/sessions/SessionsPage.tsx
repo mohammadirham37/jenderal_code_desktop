@@ -33,9 +33,9 @@ export function SessionsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-neutral-200 px-4 dark:border-neutral-800">
-        <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <Clock size={15} className="text-indigo-400" /> Sessions
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 px-4 dark:border-neutral-800">
+        <h1 className="flex items-center gap-2.5 font-display text-[19px] font-semibold tracking-tight">
+          <Clock size={16} className="text-accent-500" /> Sessions
         </h1>
         <div className="relative ml-auto w-72">
           <Search size={12} className="absolute left-2.5 top-2.5 text-neutral-500" />
@@ -56,7 +56,7 @@ export function SessionsPage() {
             hint={query ? undefined : "Start a conversation in the workspace."}
           />
         )}
-        <div className="overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <div className="overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-800">
           {list.map((s, i) => (
             <div
               key={s.id}

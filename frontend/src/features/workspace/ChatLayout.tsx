@@ -77,7 +77,7 @@ export function ChatLayout() {
       <div style={{ width: sidebar.size }} className="min-h-0 shrink-0 border-r border-neutral-200 dark:border-neutral-800">
         <SessionSidebar />
       </div>
-      <div {...sidebar.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-indigo-500/40" />
+      <div {...sidebar.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
 
       <div className="relative min-w-0 flex-1">
         <ChatPanel variant="full" />
@@ -92,7 +92,7 @@ export function ChatLayout() {
       </div>
 
       {contextOpen && (
-        <div {...context.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-indigo-500/40" />
+        <div {...context.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
       )}
       <div
         style={{ width: context.size }}
@@ -100,16 +100,16 @@ export function ChatLayout() {
           contextOpen ? "flex" : "hidden"
         }`}
       >
-        <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-neutral-200 px-1.5 [scrollbar-width:none] dark:border-neutral-800">
+        <div className="flex h-10 shrink-0 items-stretch gap-3 overflow-x-auto border-b border-neutral-200 px-3 [scrollbar-width:none] dark:border-neutral-800">
           {CONTEXT_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => showTab(id)}
               title={label}
-              className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] ${
+              className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 font-mono text-[10.5px] tracking-wide uppercase transition-colors ${
                 tab === id
-                  ? "bg-indigo-500/10 font-medium text-indigo-500 dark:text-indigo-300"
-                  : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+                  ? "border-accent-500 text-neutral-900 dark:text-neutral-100"
+                  : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
               }`}
             >
               <Icon size={12} /> {label}
@@ -136,7 +136,7 @@ export function ChatLayout() {
 }
 
 function darkPanel(t: ContextTab) {
-  return t === "terminal" || t === "git" ? "bg-[#0d0f14] text-neutral-200" : "";
+  return t === "terminal" || t === "git" ? "bg-neutral-950 text-neutral-200" : "";
 }
 
 /** Sessions of the current workspace, newest first. */
@@ -164,13 +164,16 @@ function SessionSidebar() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-neutral-50 dark:bg-[#0f1116]">
+    <div className="flex h-full flex-col bg-neutral-100/70 dark:bg-neutral-925">
       <div className="p-2">
         <button
           onClick={() => workspace && void useChat.getState().newSession(workspace.id)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-indigo-500"
+          className="flex w-full items-center justify-between rounded-[5px] bg-accent-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-accent-700 dark:bg-accent-400 dark:text-neutral-950 dark:hover:bg-accent-300"
         >
-          <Plus size={13} /> New conversation
+          <span className="flex items-center gap-1.5">
+            <Plus size={13} /> New conversation
+          </span>
+          <kbd className="font-mono text-[10px] opacity-60">⌘K</kbd>
         </button>
         <div className="relative mt-2">
           <Search size={12} className="absolute left-2.5 top-2 text-neutral-400" />
@@ -178,7 +181,7 @@ function SessionSidebar() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search conversations"
-            className="w-full rounded-md border border-neutral-200 bg-white py-1.5 pl-7 pr-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-neutral-800 dark:bg-[#0d0f14]"
+            className="w-full rounded-[5px] border border-neutral-200 bg-white py-1.5 pl-7 pr-2 text-[11px] focus:border-accent-500 focus:outline-none dark:border-neutral-800 dark:bg-neutral-950"
           />
         </div>
       </div>
@@ -194,8 +197,10 @@ function SessionSidebar() {
             <div
               key={s.id}
               onClick={() => !active && void useChat.getState().selectSession(s.id)}
-              className={`group mb-0.5 cursor-pointer rounded-lg px-2.5 py-2 ${
-                active ? "bg-indigo-500/10" : "hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60"
+              className={`group relative mb-px cursor-pointer rounded-[4px] px-2.5 py-2 transition-colors ${
+                active
+                  ? "bg-white shadow-[inset_0_0_0_1px_var(--color-neutral-200)] dark:bg-neutral-850 dark:shadow-[inset_0_0_0_1px_var(--color-neutral-800)]"
+                  : "hover:bg-neutral-200/60 dark:hover:bg-neutral-800/50"
               }`}
             >
               {editing === s.id ? (
@@ -209,11 +214,11 @@ function SessionSidebar() {
                     if (e.key === "Enter") void commitRename(s.id);
                     if (e.key === "Escape") setEditing(null);
                   }}
-                  className="w-full rounded border border-indigo-500/50 bg-transparent px-1 text-xs focus:outline-none"
+                  className="w-full rounded border border-accent-500/50 bg-transparent px-1 text-xs focus:outline-none"
                 />
               ) : (
                 <div className="flex items-center gap-1.5">
-                  <MessageSquare size={12} className={`shrink-0 ${active ? "text-indigo-400" : "text-neutral-400"}`} />
+                  <MessageSquare size={12} className={`shrink-0 ${active ? "text-accent-600 dark:text-accent-400" : "text-neutral-400"}`} />
                   <span className={`min-w-0 flex-1 truncate text-xs ${active ? "font-medium" : ""}`}>{s.title}</span>
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
@@ -240,7 +245,8 @@ function SessionSidebar() {
                   </span>
                 </div>
               )}
-              <div className="mt-0.5 pl-[18px] text-[10px] text-neutral-500">
+              {active && <span className="absolute inset-y-2 left-0 w-[2px] bg-accent-500" />}
+              <div className="mt-0.5 pl-[18px] font-mono text-[10px] text-neutral-500">
                 {formatRelative(s.updated_at)} · {s.message_count} msg
               </div>
             </div>

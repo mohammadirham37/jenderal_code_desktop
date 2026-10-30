@@ -84,8 +84,17 @@ export function TerminalPanel() {
         fontFamily: "var(--font-mono)",
         cursorBlink: true,
         theme: {
-          background: "#0d0f14",
-          foreground: "#d4d4d8",
+          background: "#0c0f0e",
+          foreground: "#d6ddda",
+          cursor: "#2fc3a5",
+          cursorAccent: "#0c0f0e",
+          selectionBackground: "#13a68b55",
+          black: "#151a18",
+          brightBlack: "#67746f",
+          green: "#2fc3a5",
+          brightGreen: "#62dbbf",
+          cyan: "#56b6c2",
+          brightCyan: "#7fd3dc",
         },
       });
       const fit = new FitAddon();
@@ -148,7 +157,7 @@ export function TerminalPanel() {
             onClick={() => setActiveId(t.id)}
             className={`flex cursor-pointer items-center gap-1 px-3 text-[11px] ${
               activeId === t.id
-                ? "border-b-2 border-b-indigo-500 font-medium"
+                ? "border-b-2 border-b-accent-500 font-medium"
                 : "text-neutral-500 hover:text-neutral-300"
             }`}
           >

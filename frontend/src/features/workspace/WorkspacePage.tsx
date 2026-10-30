@@ -19,13 +19,13 @@ export function WorkspacePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-neutral-200 px-3 text-[11px] dark:border-neutral-800">
-        <span className="font-semibold">{workspace.name}</span>
-        <span className="hidden truncate text-neutral-500 md:inline" title={workspace.root_path}>
+      <div className="flex h-10 shrink-0 items-center gap-2.5 border-b border-neutral-200 px-3 text-[11px] dark:border-neutral-800">
+        <span className="font-display text-[14px] font-semibold">{workspace.name}</span>
+        <span className="hidden truncate font-mono text-[10.5px] text-neutral-500 md:inline" title={workspace.root_path}>
           {workspace.root_path}
         </span>
         {workspace.is_git_repo && (
-          <span className="inline-flex shrink-0 items-center gap-0.5 text-neutral-500">
+          <span className="inline-flex shrink-0 items-center gap-0.5 font-mono text-[10px] text-neutral-500">
             <GitBranch size={10} /> git
           </span>
         )}
@@ -47,7 +47,7 @@ function LayoutSwitch() {
   const layout = useApp((s) => s.layout);
   const setLayout = useApp((s) => s.setLayout);
   return (
-    <div className="flex items-center rounded-lg bg-neutral-200/70 p-0.5 dark:bg-neutral-800/80" role="tablist">
+    <div className="flex items-center rounded-[5px] border border-neutral-300 p-0.5 dark:border-neutral-700" role="tablist">
       {LAYOUTS.map(({ id, label, icon: Icon, hint }) => (
         <button
           key={id}
@@ -55,9 +55,9 @@ function LayoutSwitch() {
           aria-selected={layout === id}
           title={hint}
           onClick={() => setLayout(id)}
-          className={`flex items-center gap-1 rounded-md px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+          className={`flex items-center gap-1.5 rounded-[3px] px-2.5 py-1 font-mono text-[10px] tracking-wider uppercase transition-colors ${
             layout === id
-              ? "bg-white text-indigo-600 shadow-sm dark:bg-neutral-950 dark:text-indigo-300"
+              ? "bg-neutral-900 text-accent-300 dark:bg-accent-400 dark:text-neutral-950"
               : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
           }`}
         >
@@ -87,8 +87,10 @@ function CodeLayout() {
   };
 
   const tabClass = (t: BottomTab) =>
-    `flex items-center gap-1 rounded px-2.5 py-1 text-[11px] ${
-      bottomTab === t ? "bg-indigo-500/10 font-medium text-indigo-400" : "text-neutral-500 hover:text-neutral-300"
+    `-mb-px flex h-full items-center gap-1.5 border-b-2 px-1 font-mono text-[10.5px] tracking-wide uppercase transition-colors ${
+      bottomTab === t
+        ? "border-accent-500 text-neutral-900 dark:text-neutral-100"
+        : "border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
     }`;
 
   return (
@@ -96,7 +98,7 @@ function CodeLayout() {
       <div style={{ width: explorer.size }} className="min-h-0 shrink-0 border-r border-neutral-200 dark:border-neutral-800">
         <FileExplorer />
       </div>
-      <div {...explorer.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-indigo-500/40" />
+      <div {...explorer.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -104,12 +106,12 @@ function CodeLayout() {
             <LazyEditorPane />
           </PanelSuspense>
         </div>
-        {bottomOpen && <div {...bottom.handleProps} className="h-1 shrink-0 cursor-row-resize hover:bg-indigo-500/40" />}
+        {bottomOpen && <div {...bottom.handleProps} className="h-1 shrink-0 cursor-row-resize hover:bg-accent-500/40" />}
         <div
           style={{ height: bottom.size }}
           className={`min-h-0 shrink-0 flex-col border-t border-neutral-200 dark:border-neutral-800 ${bottomOpen ? "flex" : "hidden"}`}
         >
-          <div className="flex h-8 shrink-0 items-center gap-1 border-b border-neutral-200 px-1 dark:border-neutral-800">
+          <div className="flex h-8 shrink-0 items-stretch gap-3 border-b border-neutral-200 px-2.5 dark:border-neutral-800">
             <button className={tabClass("terminal")} onClick={() => showTab("terminal")}>
               <TerminalIcon size={11} /> Terminal
             </button>
@@ -119,11 +121,11 @@ function CodeLayout() {
             <button className={tabClass("browser")} onClick={() => showTab("browser")}>
               <Globe size={11} /> Browser
             </button>
-            <IconButton className="ml-auto" title="Hide bottom panel" onClick={() => setBottomOpen(false)}>
+            <IconButton className="ml-auto self-center" title="Hide bottom panel" onClick={() => setBottomOpen(false)}>
               <PanelBottomClose size={13} />
             </IconButton>
           </div>
-          <div className="relative min-h-0 flex-1 bg-[#0d0f14] text-neutral-200">
+          <div className="relative min-h-0 flex-1 bg-neutral-950 text-neutral-200">
             {[...visited].map((t) => (
               <div key={t} className={`absolute inset-0 ${t === bottomTab ? "block" : "hidden"}`}>
                 <PanelSuspense>
@@ -136,7 +138,7 @@ function CodeLayout() {
           </div>
         </div>
         {!bottomOpen && (
-          <div className="flex h-7 shrink-0 items-center gap-1 border-t border-neutral-200 px-1 dark:border-neutral-800">
+          <div className="flex h-7 shrink-0 items-stretch gap-3 border-t border-neutral-200 px-2.5 dark:border-neutral-800">
             <button className={tabClass("terminal")} onClick={() => showTab("terminal")}>
               <PanelBottom size={11} /> Terminal
             </button>
@@ -150,7 +152,7 @@ function CodeLayout() {
         )}
       </div>
 
-      <div {...chat.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-indigo-500/40" />
+      <div {...chat.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
       <div style={{ width: chat.size }} className="min-h-0 shrink-0 border-l border-neutral-200 dark:border-neutral-800">
         <ChatPanel variant="side" />
       </div>

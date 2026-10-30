@@ -43,7 +43,7 @@ export function ApprovalCard({
 
   return (
     <div
-      className={`my-2 rounded-lg border p-3 ${
+      className={`my-2 rounded-md border p-3 ${
         decided
           ? "border-neutral-200 opacity-60 dark:border-neutral-800"
           : "border-amber-500/40 bg-amber-500/5"
@@ -58,7 +58,7 @@ export function ApprovalCard({
           </div>
           {approval.preview && (
             <button
-              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:underline"
+              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-accent-600 dark:text-accent-400 hover:underline"
               onClick={() => onOpenDiff(`approval:${approval.id}`, approval.description, approval.preview!)}
             >
               {approval.preview.startsWith("diff --git") || approval.preview.includes("\n@@") ? (

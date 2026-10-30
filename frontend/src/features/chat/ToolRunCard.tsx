@@ -47,7 +47,7 @@ export function statusVisual(status: ToolRunRecord["status"]) {
     case "awaiting_approval":
       return { icon: <ShieldAlert size={11} />, className: "text-amber-500" };
     case "running":
-      return { icon: <Loader2 size={11} className="animate-spin" />, className: "text-indigo-400" };
+      return { icon: <Loader2 size={11} className="animate-spin" />, className: "text-accent-600 dark:text-accent-400" };
     default:
       return { icon: <Loader2 size={11} className="animate-spin" />, className: "text-neutral-400" };
   }
@@ -70,7 +70,7 @@ export function ToolRunCard({
   const cmdArg = (run.args?.command as string) ?? null;
 
   return (
-    <div className="my-1 overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800">
+    <div className="my-1 overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-800">
       <button
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] hover:bg-neutral-100 dark:hover:bg-neutral-800/50"
         onClick={() => setOpen(!open)}
@@ -79,7 +79,7 @@ export function ToolRunCard({
         <span className="font-medium">{meta.label}</span>
         {pathArg && (
           <span
-            className="cursor-pointer truncate font-mono text-indigo-400 hover:underline"
+            className="cursor-pointer truncate font-mono text-accent-600 dark:text-accent-400 hover:underline"
             onClick={(e) => {
               e.stopPropagation();
               onOpenPath?.(pathArg);
@@ -115,7 +115,7 @@ export function ToolRunCard({
         </span>
       </button>
       {open && (
-        <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-2 text-[11px] dark:border-neutral-800 dark:bg-[#101218]">
+        <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-2 text-[11px] dark:border-neutral-800 dark:bg-neutral-925">
           <div className="mb-1 font-semibold text-neutral-500">Arguments</div>
           <pre className="mb-2 max-h-40 overflow-auto rounded bg-neutral-200/60 p-2 font-mono text-[10px] dark:bg-neutral-800/60">
             {JSON.stringify(run.args, null, 2)}
