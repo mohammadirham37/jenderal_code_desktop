@@ -36,6 +36,7 @@
 | `frontend/src/features/workspace/ChatLayout.tsx` | modify | Render `CenterColumn` |
 | `frontend/src/features/settings/AgentCliSettings.tsx` | create | Edit the agent list |
 | `frontend/src/features/settings/SettingsPage.tsx` | modify | "Agent CLIs" section |
+| `frontend/src/main.tsx` | modify | Bundle Plex Mono 600 (Task 10) |
 | `CLAUDE.md` | modify | Document the feature |
 
 ---
@@ -1462,4 +1463,94 @@ Verify:
 ```bash
 git add CLAUDE.md
 git commit -m "Document chat column terminal and agent tabs"
+```
+
+---
+
+### Task 10: Terminal font matches the app (IBM Plex Mono)
+
+**Why:** xterm gets `fontFamily: "var(--font-mono)"`. xterm measures cells with canvas text metrics, where CSS variables are invalid, so it measures a fallback font. Plex Mono is also a lazily loaded web font: if xterm opens before it loads, cell size is computed for the fallback. Bold text asks for weight 700, which is not bundled, so the browser synthesizes it.
+
+**Files:**
+- Modify: `frontend/src/main.tsx` (fontsource imports)
+- Modify: `frontend/src/features/terminal/xtermRegistry.ts`
+
+- [ ] **Step 1: Bundle Plex Mono 600 for bold text**
+
+In `frontend/src/main.tsx`, after `import "@fontsource/ibm-plex-mono/latin-500.css";` add:
+
+```ts
+import "@fontsource/ibm-plex-mono/latin-600.css";
+```
+
+- [ ] **Step 2: Resolve the font stack and open terminals only after the font loads**
+
+In `xtermRegistry.ts`, add below `THEME`:
+
+```ts
+/** The app's mono stack as a literal string: xterm measures with canvas,
+ *  where `var(--font-mono)` is invalid. */
+function monoFamily(): string {
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() ||
+    '"IBM Plex Mono", ui-monospace, monospace'
+  );
+}
+
+/** Web fonts load lazily; measuring before they arrive sizes cells for the
+ *  fallback font. */
+const fontsReady: Promise<unknown> = Promise.all(
+  ["400", "600"].map((w) => document.fonts.load(`${w} 12px "IBM Plex Mono"`)),
+).catch(() => {});
+```
+
+In `ensureXterm`, replace the `new XTerm({...})` options with:
+
+```ts
+    const term = new XTerm({
+      fontSize,
+      fontFamily: monoFamily(),
+      fontWeight: "400",
+      fontWeightBold: "600",
+      lineHeight: 1.2,
+      cursorBlink: true,
+      theme: THEME,
+    });
+```
+
+Replace the body of `attachXterm` with:
+
+```ts
+export function attachXterm(id: string, host: HTMLElement, fontSize: number) {
+  const entry = ensureXterm(id, fontSize);
+  if (entry.el.parentElement !== host) host.appendChild(entry.el);
+  entry.term.options.fontSize = fontSize;
+  if (entry.opened) {
+    fitXterm(id);
+    return;
+  }
+  void fontsReady.then(() => {
+    // Skip if the tab was closed (or already opened) while fonts loaded.
+    if (entry.opened || entries.get(id) !== entry) return;
+    entry.term.open(entry.el);
+    entry.opened = true;
+    fitXterm(id);
+  });
+}
+```
+
+- [ ] **Step 3: Build**
+
+Run: `cd frontend && npm run build`
+Expected: success.
+
+- [ ] **Step 4: Manual check**
+
+In `tauri dev`, open a terminal (context panel and a centre tab). Text uses IBM Plex Mono (same glyphs as the mono labels in the UI: compare `0`, `l`, `r`), no gaps between characters, bold prompt segments are crisp (not smeared), and the first prompt still appears.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/main.tsx frontend/src/features/terminal/xtermRegistry.ts
+git commit -m "Render terminals in the app's IBM Plex Mono"
 ```
