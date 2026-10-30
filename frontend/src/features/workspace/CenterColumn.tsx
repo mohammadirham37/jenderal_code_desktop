@@ -10,7 +10,7 @@ import { Button, IconButton } from "@/components/ui";
 import { LazyXtermView, PanelSuspense } from "./lazy";
 import { AgentUsageButton } from "./AgentUsage";
 
-export function CenterColumn({ trailing }: { trailing?: ReactNode }) {
+export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trailing?: ReactNode }) {
   const { tabs, activeId } = useCenterTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId })));
   const showChat = activeId === CHAT_TAB;
   useNewTerminalShortcut();
@@ -18,6 +18,7 @@ export function CenterColumn({ trailing }: { trailing?: ReactNode }) {
   return (
     <div className="flex h-full min-w-0 flex-col">
       <div className="flex h-9 shrink-0 items-stretch border-b border-neutral-200 pl-1 pr-2 dark:border-neutral-800">
+        {leading && <div className="mr-1 flex items-center">{leading}</div>}
         <div className="flex min-w-0 items-stretch overflow-x-auto [scrollbar-width:none]">
           <TabButton
             active={showChat}
