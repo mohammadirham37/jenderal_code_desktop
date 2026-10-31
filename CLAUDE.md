@@ -27,6 +27,8 @@ npx --yes @tauri-apps/cli@2 build --bundles app   # skip DMG if Finder AppleEven
 
 `tauri.conf.json` locates `frontend/` by walking up from the cwd, so `tauri dev/build` works from the root or `apps/desktop`.
 
+Releases for macOS, Linux and Windows: follow `docs/RELEASE.md` (Linux/Windows via `scripts/release/` in Docker, macOS universal on a Mac). This repo is public: never commit credentials, SSH hosts/users/IPs, or local/remote folder paths. Use placeholders such as `<build-host>`.
+
 ## Architecture
 
 Workspace layout: `apps/desktop` (Tauri shell), `crates/*` (libraries, all named `jcode-*`), `frontend/` (React 19 + Vite + Tailwind 4 + zustand), `tests/e2e`.
