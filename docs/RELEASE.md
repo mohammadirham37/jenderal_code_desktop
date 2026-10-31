@@ -68,8 +68,25 @@ npx --yes @tauri-apps/cli@2 build --target universal-apple-darwin --bundles app,
 ```
 
 Hasil ada di `target/universal-apple-darwin/release/bundle/{macos,dmg}/`.
-Kalau pembuatan DMG gagal karena AppleEvent Finder timeout, pakai
-`--bundles app` lalu zip `.app`-nya.
+Kalau pembuatan DMG gagal karena AppleEvent Finder timeout (-1712), `.app`
+sudah jadi. Lepas dulu image sementara yang masih ter-mount (`hdiutil info`,
+lalu `hdiutil detach <disk>`) dan hapus `bundle/macos/rw.*.dmg`, kemudian buat
+DMG langsung dengan `hdiutil` (tanpa tata letak jendela Finder):
+
+```bash
+B=target/universal-apple-darwin/release/bundle
+STAGE=$(mktemp -d)
+cp -R "$B/macos/JenderalCode.app" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname JenderalCode -srcfolder "$STAGE" -fs HFS+ -format UDZO \
+  -ov "$B/dmg/JenderalCode_<versi>_universal.dmg"
+rm -rf "$STAGE"
+hdiutil verify "$B/dmg/JenderalCode_<versi>_universal.dmg"
+lipo -archs "$B/macos/JenderalCode.app/Contents/MacOS/jenderalcode-desktop"   # harus: x86_64 arm64
+```
+
+Build universal butuh sekitar 1,5 GB ruang kosong (dua target ~575 MB
+masing-masing). Kalau disk sempit, build `--target aarch64-apple-darwin` saja.
 
 Saat ini app hanya ditandatangani ad-hoc (`signingIdentity: "-"`), tanpa
 notarisasi. Pengguna harus membukanya lewat klik kanan → Open, atau
