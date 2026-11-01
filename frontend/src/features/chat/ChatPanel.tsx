@@ -36,7 +36,8 @@ import { useSkills } from "@/stores/skills";
 import { useApp } from "@/stores/app";
 import { useEditor } from "@/stores/editor";
 import { useProviders } from "@/stores/providers";
-import { api, type ApprovalRecord, type MessageRecord, type ToolRunRecord } from "@/lib/ipc";
+import { api, type ApprovalRecord, type ImageAttachment, type MessageRecord, type ToolRunRecord } from "@/lib/ipc";
+import { imageUrl, prepareImage } from "@/lib/images";
 import { Badge, IconButton, Spinner } from "@/components/ui";
 import { TodoDock, ToolRunCard } from "./ToolRunCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -83,6 +84,8 @@ const SUGGESTIONS = [
 ];
 
 const MAX_ATTACHMENTS = 10;
+/** Matches `agent-runtime::MAX_IMAGES`. */
+const MAX_IMAGES = 6;
 
 /** Must match `PAUSE_MARKER` in crates/agent-runtime. */
 const PAUSE_MARKER = "⏸ **Paused.**";
@@ -115,18 +118,26 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [images, setImages] = useState<ImageAttachment[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slash = useSlashMenu(input, setInput);
+  const mention = useMentionMenu(input, setInput, textareaRef, (path) => addAttachments([path]));
 
   const session = chat.sessions.find((s) => s.id === chat.activeSessionId) ?? null;
+  const modelsOf = useProviders((s) => s.modelsOf);
+  // `false` only when the provider says the model has no vision; unknown is allowed.
+  const vision = session?.provider_id
+    ? modelsOf(session.provider_id).find((m) => m.name === session.model_name)?.capabilities.vision
+    : undefined;
   const busy = chat.status !== "idle";
   const draftKey = `jcode:draft:${chat.activeSessionId ?? "none"}`;
 
   // Persist drafts (PRD §9.2).
   useEffect(() => {
     setInput(localStorage.getItem(draftKey) ?? "");
+    setImages([]);
   }, [draftKey]);
   useEffect(() => {
     if (input) localStorage.setItem(draftKey, input);
@@ -162,26 +173,57 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
    *  ends) and ⌘/Ctrl+Enter steers the running turn with it. */
   const send = async (override?: string, mode: "send" | "steer" = "send") => {
     const text = (override ?? input).trim();
-    if (!text || !chat.activeSessionId) return;
+    const pics = override === undefined ? images : [];
+    if ((!text && pics.length === 0) || !chat.activeSessionId) return;
     const files = attachments;
     setInput("");
     setAttachments([]);
+    if (override === undefined) setImages([]);
     if (busy) {
-      if (mode === "steer" && files.length === 0) {
+      if (mode === "steer" && files.length === 0 && pics.length === 0) {
         await useChat.getState().steer(text);
       } else {
-        if (mode === "steer") setNotice("Messages with attachments can't steer; queued for after this turn.");
-        useChat.getState().enqueue(text, files);
+        if (mode === "steer") setNotice("Messages with files or images can't steer; queued for after this turn.");
+        useChat.getState().enqueue(text, files, pics);
       }
       return;
     }
     try {
-      await useChat.getState().send(text, files);
+      await useChat.getState().send(text, files, pics);
     } catch (e) {
       setNotice(String(e));
       setInput(text);
       setAttachments(files);
+      setImages(pics);
     }
+  };
+
+  /** Pasted or dropped images, scaled down for the model. */
+  const addImages = async (blobs: Blob[]) => {
+    if (blobs.length === 0) return;
+    if (vision === false) {
+      setNotice(`${session?.model_name ?? "This model"} does not accept images. Pick a model with vision to send them.`);
+      return;
+    }
+    const room = MAX_IMAGES - images.length;
+    if (room <= 0) return setNotice(`At most ${MAX_IMAGES} images per message.`);
+    try {
+      const prepared = await Promise.all(blobs.slice(0, room).map(prepareImage));
+      setImages((cur) => [...cur, ...prepared].slice(0, MAX_IMAGES));
+      if (blobs.length > room) setNotice(`At most ${MAX_IMAGES} images per message.`);
+    } catch (e) {
+      setNotice(`Could not read the image: ${String(e)}`);
+    }
+  };
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    const blobs = [...e.clipboardData.items]
+      .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (blobs.length === 0) return; // plain text paste
+    e.preventDefault();
+    void addImages(blobs);
   };
 
   const addAttachments = (paths: string[]) =>
@@ -213,6 +255,8 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    const dropped = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
+    if (dropped.length) return void addImages(dropped);
     const text = e.dataTransfer.getData("text/plain");
     // A single-line path dragged from the explorer.
     if (text && !text.includes("\n")) addAttachments([text]);
@@ -369,6 +413,26 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
               full ? "shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)]" : ""
             }`}
           >
+            {images.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
+                {images.map((img, i) => (
+                  <span key={i} className="group/img relative">
+                    <img
+                      src={imageUrl(img)}
+                      alt={`Pasted image ${i + 1}`}
+                      className="h-14 w-14 rounded-[4px] border border-neutral-200 object-cover dark:border-neutral-700"
+                    />
+                    <button
+                      title="Remove image"
+                      onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}
+                      className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-neutral-900 text-white group-hover/img:flex dark:bg-neutral-100 dark:text-neutral-900"
+                    >
+                      <X size={9} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-1 px-2.5 pt-2">
                 {attachments.map((a) => (
@@ -388,12 +452,14 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
               </div>
             )}
             {slash.menu}
+            {mention.menu}
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={(e) => {
-                if (slash.onKeyDown(e)) return;
+                if (slash.onKeyDown(e) || mention.onKeyDown(e)) return;
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   void send(undefined, e.metaKey || e.ctrlKey ? "steer" : "send");
@@ -448,7 +514,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                   <button
                     title="Send (Enter)"
                     onClick={() => void send()}
-                    disabled={!input.trim() || !chat.activeSessionId}
+                    disabled={(!input.trim() && images.length === 0) || !chat.activeSessionId}
                     className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-accent-600 text-white transition-colors hover:bg-accent-700 disabled:bg-neutral-200 disabled:text-neutral-400 dark:bg-accent-400 dark:text-neutral-950 dark:hover:bg-accent-300 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-600"
                   >
                     <ArrowUp size={13} />
@@ -461,7 +527,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
             <div className="mt-1.5 text-center text-[10px] text-neutral-400">
               {busy
                 ? `Enter to queue · ${isMac ? "⌘" : "Ctrl+"}Enter to steer the running turn · Shift+Enter for newline`
-                : "Enter to send · Shift+Enter for newline · drag files from the explorer to attach"}
+                : `Enter to send · Shift+Enter for newline · @ to attach a file${vision === false ? "" : " · paste images"}`}
             </div>
           )}
         </div>
@@ -505,13 +571,18 @@ function PendingMessages({
         <div key={m.id} className={`group ${row}`}>
           <span className="eyebrow w-10 shrink-0">{i === 0 ? "Next" : `#${i + 1}`}</span>
           <span className="min-w-0 flex-1 truncate text-neutral-700 dark:text-neutral-300">{m.text}</span>
+          {m.images.length > 0 && (
+            <span className="shrink-0 font-mono text-[10px] text-neutral-500">
+              {m.images.length} image{m.images.length === 1 ? "" : "s"}
+            </span>
+          )}
           {m.attachments.length > 0 && (
             <span className="shrink-0 font-mono text-[10px] text-neutral-500">
               <Paperclip size={10} className="mr-0.5 inline" />
               {m.attachments.length}
             </span>
           )}
-          {canSteer && m.attachments.length === 0 && (
+          {canSteer && m.attachments.length === 0 && m.images.length === 0 && (
             <button
               title="Steer the running turn with this message now"
               onClick={() => void useChat.getState().steerQueued(m.id)}
@@ -1010,6 +1081,7 @@ const MessageBubble = memo(function MessageBubble({
     return <SummaryCard content={message.content.slice(COMPACTION_MARKER.length).trim()} full={full} />;
   }
   const skillUse = message.role === "user" ? parseSkillInvocation(message.content) : null;
+  const userText = splitAttachments(message.content);
   if (message.role === "user") {
     return (
       <div className={`group flex animate-rise flex-col ${full ? "mb-6 items-end" : "mb-4"}`}>
@@ -1029,7 +1101,23 @@ const MessageBubble = memo(function MessageBubble({
               {skillUse.request}
             </>
           ) : (
-            message.content
+            userText.text
+          )}
+          {(message.images?.length ?? 0) > 0 && <MessageImages images={message.images!} />}
+          {userText.files.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1 whitespace-normal">
+              {userText.files.map((f) => (
+                <button
+                  key={f}
+                  title={`Attached: ${f}`}
+                  onClick={() => onOpenFile(f)}
+                  className="inline-flex max-w-full items-center gap-1 rounded-[3px] bg-accent-500/10 px-1.5 py-0.5 font-mono text-[10px] text-accent-700 hover:bg-accent-500/20 dark:text-accent-300"
+                >
+                  <Paperclip size={9} className="shrink-0" />
+                  <span className="truncate">{f}</span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -1059,13 +1147,55 @@ const MessageBubble = memo(function MessageBubble({
 /** A user message sent as `/skill ...` is stored with the skill's
  *  instructions attached (see `skills::expand_slash_command`); show only the
  *  command and the request. */
+/** Images of a user message; click one to see it full size. */
+function MessageImages({ images }: { images: ImageAttachment[] }) {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <div className="mt-2 whitespace-normal">
+      <div className="flex flex-wrap gap-1.5">
+        {images.map((img, i) => (
+          <button key={i} onClick={() => setOpen(open === i ? null : i)} title="Show full size">
+            <img
+              src={imageUrl(img)}
+              alt={`Image ${i + 1}`}
+              className={`h-24 max-w-48 rounded-[4px] border object-cover ${
+                open === i ? "border-accent-500" : "border-neutral-200 dark:border-neutral-700"
+              }`}
+            />
+          </button>
+        ))}
+      </div>
+      {open !== null && images[open] && (
+        <img
+          src={imageUrl(images[open])}
+          alt={`Image ${open + 1}`}
+          onClick={() => setOpen(null)}
+          className="mt-1.5 max-h-[70vh] max-w-full cursor-zoom-out rounded-[4px] border border-neutral-200 dark:border-neutral-700"
+        />
+      )}
+    </div>
+  );
+}
+
+/** Header `context::pack_attachments` puts before attached file contents. */
+const ATTACHED_MARKER = "\n\n--- Attached files ---";
+
+/** A user message's own text and the names of the files attached to it
+ *  (their contents went to the model; the chat shows just the names). */
+function splitAttachments(content: string): { text: string; files: string[] } {
+  const at = content.indexOf(ATTACHED_MARKER);
+  if (at < 0) return { text: content, files: [] };
+  const files = [...content.slice(at).matchAll(/\n\n`([^`\n]+)`:(?:\n| could not be read)/g)].map((m) => m[1]);
+  return { text: content.slice(0, at), files };
+}
+
 function parseSkillInvocation(content: string): { name: string; request: string } | null {
   const m = /^<skill name="([^"]+)"/.exec(content);
   if (!m) return null;
   const marker = "Follow its instructions for this request:\n";
   const at = content.indexOf(marker);
   if (at < 0) return null;
-  const request = content.slice(at + marker.length).split("\n\n--- Attached files ---")[0];
+  const request = content.slice(at + marker.length).split(ATTACHED_MARKER)[0];
   return { name: m[1], request: request.startsWith("(no further details given") ? "" : request };
 }
 
@@ -1129,6 +1259,95 @@ function useSlashMenu(input: string, setInput: (v: string) => void) {
           <div className="truncate text-[10.5px] text-neutral-500">{s.description}</div>
         </button>
       ))}
+    </div>
+  ) : null;
+
+  return { menu, onKeyDown };
+}
+
+/** `@` file mentions: typing `@query` lists matching project files; picking
+ *  one writes `@path` and attaches the file (its content goes with the
+ *  message, see `context::pack_attachments`). */
+function useMentionMenu(
+  input: string,
+  setInput: (v: string) => void,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+  onPick: (path: string) => void,
+) {
+  const [files, setFiles] = useState<string[]>([]);
+  const [index, setIndex] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const caret = textareaRef.current?.selectionStart ?? input.length;
+  const match = /(^|\s)@([^\s@]*)$/.exec(input.slice(0, caret));
+  const query = match?.[2];
+
+  useEffect(() => {
+    if (query === undefined) return setFiles([]);
+    let stale = false;
+    const t = setTimeout(() => {
+      api
+        .fsFindFiles(query)
+        .then((found) => !stale && setFiles(found.slice(0, 10)))
+        .catch(() => !stale && setFiles([]));
+    }, 80);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
+  }, [query]);
+  useEffect(() => setIndex(0), [query]);
+
+  const open = query !== undefined && files.length > 0 && dismissed !== input;
+  const pick = (path: string) => {
+    if (query === undefined) return;
+    const start = caret - query.length - 1;
+    const next = `${input.slice(0, start)}@${path} ${input.slice(caret)}`;
+    setInput(next);
+    onPick(path);
+    const pos = start + path.length + 2;
+    requestAnimationFrame(() => textareaRef.current?.setSelectionRange(pos, pos));
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) return false;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setIndex((i) => (i + (e.key === "ArrowDown" ? 1 : files.length - 1)) % files.length);
+      return true;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      pick(files[index]);
+      return true;
+    }
+    if (e.key === "Escape") {
+      setDismissed(input);
+      return true;
+    }
+    return false;
+  };
+
+  const menu = open ? (
+    <div className="animate-rise absolute bottom-full left-0 z-20 mb-1 w-full max-w-lg overflow-hidden rounded-[6px] border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="eyebrow border-b border-neutral-200 px-2.5 py-1.5 dark:border-neutral-800">Attach file</div>
+      {files.map((f, i) => {
+        const slash = f.lastIndexOf("/");
+        return (
+          <button
+            key={f}
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              pick(f);
+            }}
+            onMouseEnter={() => setIndex(i)}
+            className={`flex w-full items-baseline gap-2 px-2.5 py-1 text-left ${i === index ? "bg-accent-500/10" : ""}`}
+          >
+            <span className="shrink-0 font-mono text-[11.5px] text-neutral-900 dark:text-neutral-100">{f.slice(slash + 1)}</span>
+            <span className="min-w-0 truncate font-mono text-[10.5px] text-neutral-500">{slash > 0 ? f.slice(0, slash) : ""}</span>
+          </button>
+        );
+      })}
     </div>
   ) : null;
 

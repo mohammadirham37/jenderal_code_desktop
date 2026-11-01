@@ -12,14 +12,14 @@ import {
   Palette,
   ShieldCheck,
   BookOpen,
-  Trash2,
-} from "lucide-react";
+  Trash2, Plug } from "lucide-react";
 import { api, type UsageSummary } from "@/lib/ipc";
 import { useApp } from "@/stores/app";
 import { Button, Field, inputClass } from "@/components/ui";
 import { formatCost, formatTokens } from "@/lib/format";
 import { AgentCliSettings } from "./AgentCliSettings";
 import { SkillsSettings } from "./SkillsSettings";
+import { McpSettings } from "./McpSettings";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { confirmAction } from "@/lib/confirm";
 
@@ -232,6 +232,19 @@ export function SettingsPage() {
               <code className="mx-1 font-mono">/</code>in the chat to run one directly.
             </p>
             <SkillsSettings />
+          </section>
+
+          {/* MCP servers */}
+          <section id="mcp">
+            <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              <Plug size={13} /> MCP servers
+            </h2>
+            <p className="mb-3 text-[11px] text-neutral-500">
+              Model Context Protocol servers give the agent extra tools: a browser (Playwright), your Laravel app
+              (Laravel Boost), hosted services. Servers run in the open project; the agent asks before each tool call
+              unless you allow MCP tools for the session or use full access. Not available in Plan and Review modes.
+            </p>
+            <McpSettings />
           </section>
 
           {/* Agent CLIs */}

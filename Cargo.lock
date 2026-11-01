@@ -1796,6 +1796,7 @@ dependencies = [
  "jcode-tool-filesystem",
  "jcode-tool-git",
  "jcode-tool-lsp",
+ "jcode-tool-mcp",
  "jcode-tool-terminal",
  "regex",
  "reqwest 0.12.28",
@@ -1958,6 +1959,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "jcode-tool-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "jcode-tool-terminal",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "jcode-tool-terminal"
 version = "0.1.0"
 dependencies = [
@@ -1986,6 +2001,7 @@ dependencies = [
  "jcode-storage",
  "jcode-tool-filesystem",
  "jcode-tool-git",
+ "jcode-tool-mcp",
  "jcode-tool-terminal",
  "log",
  "notify",

@@ -11,6 +11,7 @@ const GRANT_FOR_KIND: Record<string, string> = {
   delete_file: "delete_files",
   run_command: "run_commands",
   fetch_url: "fetch_urls",
+  mcp_tool: "mcp_tools",
 };
 
 export function ApprovalCard({
@@ -88,7 +89,7 @@ export function ApprovalCard({
               </Button>
               {grantKind && (
                 <Button size="sm" disabled={busy} onClick={() => void answer(true, grantKind)}>
-                  Allow for this session
+                  {grantKind === "mcp_tools" ? "Allow MCP tools for this session" : "Allow for this session"}
                 </Button>
               )}
               <Button

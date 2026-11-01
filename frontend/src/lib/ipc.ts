@@ -89,11 +89,18 @@ export interface ToolCall {
   arguments: string;
 }
 
+/** An image in a user message (base64 without a `data:` prefix). */
+export interface ImageAttachment {
+  mime: string;
+  data: string;
+}
+
 export interface MessageRecord {
   id: string;
   session_id: string;
   role: Role;
   content: string;
+  images?: ImageAttachment[];
   tool_calls: ToolCall[];
   tool_call_id?: string | null;
   tool_name?: string | null;
@@ -192,6 +199,42 @@ export interface AppSettings {
   lsp_auto_download: boolean;
   /** Skill names hidden from the agent. */
   disabled_skills: string[];
+  /** MCP server names the agent does not use. */
+  disabled_mcp_servers: string[];
+  /** Projects whose `.mcp.json` the user allowed to run. */
+  mcp_trusted_projects: { root: string; fingerprint: string }[];
+}
+
+/** An MCP server config (Rust `jcode_tool_mcp::ServerConfig`). */
+export interface McpServerConfig {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string | null;
+  url: string;
+  headers: Record<string, string>;
+}
+
+/** A configured server's runtime state (Rust `ServerStatus`). */
+export interface McpServerStatus {
+  name: string;
+  scope: "global" | "project";
+  summary: string;
+  state: "starting" | "ready" | "failed";
+  error?: string | null;
+  server_name?: string | null;
+  tools: { name: string; tool: string; description: string }[];
+}
+
+export interface McpOverview {
+  global_path: string | null;
+  global: McpServerConfig[];
+  global_error: string | null;
+  project: { path: string; servers: McpServerConfig[]; error: string | null; trusted: boolean } | null;
+  disabled: string[];
+  status: McpServerStatus[];
 }
 
 /** An installed skill (Rust `SkillInfo`). */
@@ -394,6 +437,8 @@ export const api = {
   // FS
   fsList: (path?: string, showHidden?: boolean) =>
     invoke<FileEntry[]>("fs_list", { path: path ?? null, showHidden: showHidden ?? null }),
+  /** Project files matching `query`, best first (for `@` mentions). */
+  fsFindFiles: (query: string) => invoke<string[]>("fs_find_files", { query }),
   fsRead: (path: string) => invoke<{ path: string; content: string }>("fs_read", { path }),
   fsWrite: (path: string, content: string) => invoke<void>("fs_write", { path, content }),
   fsCreate: (path: string, isDir: boolean) => invoke<void>("fs_create", { path, isDir }),
@@ -456,8 +501,8 @@ export const api = {
       modelName: modelName ?? null,
     }),
   getSessionDetail: (sessionId: string) => invoke<SessionDetail>("get_session_detail", { sessionId }),
-  sendMessage: (sessionId: string, content: string, attachments: string[]) =>
-    invoke<void>("send_message", { sessionId, content, attachments }),
+  sendMessage: (sessionId: string, content: string, attachments: string[], images: ImageAttachment[] = []) =>
+    invoke<void>("send_message", { sessionId, content, attachments, images }),
   /** Add a message to the running turn; `null` when no turn is running. */
   steerMessage: (sessionId: string, content: string) => invoke<string | null>("steer_message", { sessionId, content }),
   cancelGeneration: (sessionId: string) => invoke<void>("cancel_generation", { sessionId }),
@@ -536,6 +581,12 @@ export const api = {
   searchSkills: (query: string) => invoke<SkillSearchResult[]>("search_skills", { query }),
   installSkill: (source: string, skill: string) => invoke<string>("install_skill", { source, skill }),
   removeSkill: (name: string) => invoke<string>("remove_skill", { name }),
+  mcpOverview: () => invoke<McpOverview>("mcp_overview"),
+  /** Start/stop the open project's MCP servers to match the config. */
+  mcpSync: () => invoke<McpServerStatus[]>("mcp_sync"),
+  mcpRestart: (name: string) => invoke<McpServerStatus[]>("mcp_restart", { name }),
+  mcpSaveGlobal: (servers: McpServerConfig[]) => invoke<void>("mcp_save_global", { servers }),
+  mcpTrustProject: (trusted: boolean) => invoke<void>("mcp_trust_project", { trusted }),
 
   // External agents (experimental)
   cliAgentPresets: () =>

@@ -344,6 +344,7 @@ pub fn transcript(messages: &[ChatMessage], max_chars: usize) -> String {
                     .collect();
                 format!("ASSISTANT: {}\n{}", m.content, calls.join("\n")).trim_end().to_string()
             }
+            Role::User if !m.images.is_empty() => format!("USER: {}\n[{} image(s) attached]", m.content, m.images.len()),
             Role::User => format!("USER: {}", m.content),
             Role::System => format!("SYSTEM: {}", m.content),
         })
@@ -364,6 +365,7 @@ pub fn merge_consecutive_user_messages(messages: Vec<ChatMessage>) -> Vec<ChatMe
             Some(prev) if prev.role == Role::User && m.role == Role::User => {
                 prev.content.push_str("\n\n---\n\n");
                 prev.content.push_str(&m.content);
+                prev.images.extend(m.images);
             }
             _ => out.push(m),
         }
@@ -442,8 +444,14 @@ pub fn truncate_old_tool_results(messages: &mut [ChatMessage], protected_chars: 
     }
 }
 
+/// What an image costs in the character budget: ~1.6k tokens, a typical
+/// screenshot at the size the composer sends (its base64 length says little
+/// about tokens).
+const IMAGE_CHARS: usize = 6_400;
+
 fn message_size(m: &ChatMessage) -> usize {
     m.content.len()
+        + m.images.len() * IMAGE_CHARS
         + m.reasoning.as_ref().map_or(0, String::len)
         + m
             .tool_calls

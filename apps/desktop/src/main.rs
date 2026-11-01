@@ -169,6 +169,7 @@ fn main() {
             commands::fs_rename,
             commands::fs_search,
             commands::fs_glob,
+            commands::fs_find_files,
             // Credentials & providers
             commands::get_credential_backend,
             commands::switch_credential_storage,
@@ -246,6 +247,11 @@ fn main() {
             commands::search_skills,
             commands::install_skill,
             commands::remove_skill,
+            commands::mcp_overview,
+            commands::mcp_sync,
+            commands::mcp_restart,
+            commands::mcp_save_global,
+            commands::mcp_trust_project,
             // External agents
             commands::cli_agent_presets,
             commands::run_external_agent,

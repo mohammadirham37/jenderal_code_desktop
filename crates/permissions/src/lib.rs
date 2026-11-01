@@ -25,6 +25,8 @@ pub enum Grant {
     DeleteFiles,
     /// Allow fetching web pages without asking again.
     FetchUrls,
+    /// Allow MCP server tools without asking again.
+    McpTools,
 }
 
 impl Grant {
@@ -34,6 +36,7 @@ impl Grant {
             "run_commands" => Some(Grant::RunCommands),
             "delete_files" => Some(Grant::DeleteFiles),
             "fetch_urls" => Some(Grant::FetchUrls),
+            "mcp_tools" => Some(Grant::McpTools),
             _ => None,
         }
     }
@@ -61,6 +64,9 @@ pub enum Action {
     RunCommand { command: String, cwd: PathBuf },
     /// Fetch a web page (its content is sent to the model).
     FetchUrl { url: String },
+    /// Call a tool of a configured MCP server. What it does is up to the
+    /// server (browser automation, database queries, ...).
+    McpTool { server: String, tool: String },
 }
 
 impl Action {
@@ -81,6 +87,7 @@ impl Action {
             Action::DeleteFile { .. } => "delete_file",
             Action::RunCommand { .. } => "run_command",
             Action::FetchUrl { .. } => "fetch_url",
+            Action::McpTool { .. } => "mcp_tool",
         }
     }
 }
@@ -1190,6 +1197,17 @@ impl PolicyEngine {
                     })
                 }
             }
+            Action::McpTool { server, tool } => {
+                if self.grants.contains(&Grant::McpTools) || self.mode == PolicyMode::Yolo {
+                    Allowed
+                } else {
+                    NeedsApproval(ApprovalRequest {
+                        kind: action.kind().into(),
+                        description: format!("Use `{tool}` from MCP server {server}"),
+                        preview: None, // filled by the caller with the arguments
+                    })
+                }
+            }
             Action::RunCommand { command, .. } => {
                 let assessment = assess_command(command);
                 if let Some(reason) = &assessment.catastrophic {
@@ -1273,6 +1291,19 @@ mod tests {
         let file = Action::FetchUrl { url: "file:///etc/passwd".into() };
         assert!(matches!(engine(PolicyMode::Yolo).check(&file), CheckOutcome::Denied(_)));
         assert_eq!(Grant::parse("fetch_urls"), Some(Grant::FetchUrls));
+    }
+
+    #[test]
+    fn mcp_tools_ask_unless_granted_or_full_access() {
+        let call = Action::McpTool { server: "playwright".into(), tool: "browser_click".into() };
+        for mode in [PolicyMode::Safe, PolicyMode::Balanced] {
+            assert!(matches!(engine(mode).check(&call), CheckOutcome::NeedsApproval(_)), "{mode:?}");
+        }
+        assert!(matches!(engine(PolicyMode::Yolo).check(&call), CheckOutcome::Allowed));
+        let mut e = engine(PolicyMode::Balanced);
+        e.grant(Grant::McpTools);
+        assert!(matches!(e.check(&call), CheckOutcome::Allowed));
+        assert_eq!(Grant::parse("mcp_tools"), Some(Grant::McpTools));
     }
 
     #[test]

@@ -6,6 +6,7 @@ import {
   type AgentProfile,
   type ApprovalRecord,
   type ChatStatus,
+  type ImageAttachment,
   type MessageRecord,
   type SessionSummary,
   type SessionUsage,
@@ -23,6 +24,7 @@ export interface QueuedMessage {
   id: string;
   text: string;
   attachments: string[];
+  images: ImageAttachment[];
 }
 
 /** A steering message the runtime accepted; it joins the running turn at
@@ -60,13 +62,13 @@ interface ChatState {
   loadProfiles: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   newSession: (workspaceId: string, agentProfileId?: string, providerId?: string, modelName?: string) => Promise<string>;
-  send: (text: string, attachments: string[]) => Promise<void>;
+  send: (text: string, attachments: string[], images?: ImageAttachment[]) => Promise<void>;
   cancel: () => Promise<void>;
   /** Send to a specific session (the active one or a queued one). */
-  sendTo: (sessionId: string, text: string, attachments: string[]) => Promise<void>;
+  sendTo: (sessionId: string, text: string, attachments: string[], images?: ImageAttachment[]) => Promise<void>;
   /** A session's turn ended: requeue unused steering, send the next. */
   turnEnded: (sessionId: string, hold?: boolean) => void;
-  enqueue: (text: string, attachments: string[]) => void;
+  enqueue: (text: string, attachments: string[], images?: ImageAttachment[]) => void;
   removeQueued: (id: string) => void;
   /** Steer the running turn with `text` (falls back to the queue). */
   steer: (text: string) => Promise<void>;
@@ -98,10 +100,10 @@ const running = new Set<string>();
 
 /** `send_message` can race the runtime releasing the session right after
  *  the idle event, so retry briefly while it reports a running turn. */
-async function sendWhenFree(sessionId: string, text: string, attachments: string[]) {
+async function sendWhenFree(sessionId: string, text: string, attachments: string[], images: ImageAttachment[]) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await api.sendMessage(sessionId, text, attachments);
+      return await api.sendMessage(sessionId, text, attachments, images);
     } catch (e) {
       if (attempt >= 20 || !String(e).includes("already running")) throw e;
       await new Promise((r) => setTimeout(r, 100));
@@ -283,19 +285,19 @@ export const useChat = create<ChatState>((set, get) => ({
     return s.id;
   },
 
-  send: async (text, attachments) => {
+  send: async (text, attachments, images = []) => {
     const id = get().activeSessionId;
     if (!id) throw new Error("no active session");
-    await get().sendTo(id, text, attachments);
+    await get().sendTo(id, text, attachments, images);
   },
 
-  sendTo: async (sessionId, text, attachments) => {
+  sendTo: async (sessionId, text, attachments, images = []) => {
     // Sending by hand releases a held queue.
     set((s) => ({ queueHeld: { ...s.queueHeld, [sessionId]: false } }));
     if (sessionId === get().activeSessionId) set({ lastError: null, status: "thinking" });
     running.add(sessionId);
     try {
-      await sendWhenFree(sessionId, text, attachments);
+      await sendWhenFree(sessionId, text, attachments, images);
     } catch (e) {
       running.delete(sessionId);
       if (sessionId === get().activeSessionId) set({ status: "idle" });
@@ -310,7 +312,7 @@ export const useChat = create<ChatState>((set, get) => ({
     running.delete(sessionId);
     const leftover = get().steering[sessionId] ?? [];
     const queue: QueuedMessage[] = [
-      ...leftover.map((m) => ({ id: m.id, text: m.text, attachments: [] })),
+      ...leftover.map((m) => ({ id: m.id, text: m.text, attachments: [], images: [] })),
       ...(get().queued[sessionId] ?? []),
     ];
     const held = hold || get().queueHeld[sessionId] === true;
@@ -321,7 +323,7 @@ export const useChat = create<ChatState>((set, get) => ({
       queued: { ...s.queued, [sessionId]: rest },
       queueHeld: { ...s.queueHeld, [sessionId]: held && queue.length > 0 },
     }));
-    if (next) void get().sendTo(sessionId, next.text, next.attachments).catch((err) => {
+    if (next) void get().sendTo(sessionId, next.text, next.attachments, next.images).catch((err) => {
       set((s) => ({
         lastError: sessionId === s.activeSessionId ? String(err) : s.lastError,
         queued: { ...s.queued, [sessionId]: [next, ...(s.queued[sessionId] ?? [])] },
@@ -330,11 +332,11 @@ export const useChat = create<ChatState>((set, get) => ({
     });
   },
 
-  enqueue: (text, attachments) => {
+  enqueue: (text, attachments, images = []) => {
     const id = get().activeSessionId;
     if (!id) return;
     set((s) => ({
-      queued: { ...s.queued, [id]: [...(s.queued[id] ?? []), { id: localId(), text, attachments }] },
+      queued: { ...s.queued, [id]: [...(s.queued[id] ?? []), { id: localId(), text, attachments, images }] },
     }));
   },
 

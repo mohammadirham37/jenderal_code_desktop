@@ -73,6 +73,8 @@ export const useApp = create<AppState>((set, get) => ({
     lsp_diagnostics: true,
     lsp_auto_download: true,
     disabled_skills: [],
+    disabled_mcp_servers: [],
+    mcp_trusted_projects: [],
   },
   paletteOpen: false,
   ready: false,

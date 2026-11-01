@@ -3,6 +3,7 @@
 
 pub mod context;
 pub mod executor;
+pub mod mcp;
 pub mod retry;
 pub mod skills;
 pub mod subagent;
@@ -23,7 +24,7 @@ use jcode_tool_filesystem::{CheckpointStore, Workspace};
 use jcode_tool_terminal::CancelToken;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// Prefix of the assistant note written when a turn pauses (step limit or a
@@ -254,6 +255,8 @@ pub struct AgentRuntime {
     pending: Mutex<HashMap<String, PendingApproval>>,
     /// Language servers shared by all sessions (one per root + language).
     lsp: Arc<jcode_tool_lsp::LspManager>,
+    /// MCP servers shared by all sessions (one per root + server).
+    mcp: Arc<jcode_tool_mcp::McpManager>,
 }
 
 impl AgentRuntime {
@@ -271,12 +274,29 @@ impl AgentRuntime {
             sessions: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             lsp: Arc::new(jcode_tool_lsp::LspManager::new()),
+            mcp: Arc::new(jcode_tool_mcp::McpManager::new()),
         }
     }
 
     /// Stop the language servers (app exit).
     pub fn shutdown(&self) {
         self.lsp.shutdown();
+        self.mcp.shutdown();
+    }
+
+    pub fn mcp(&self) -> &Arc<jcode_tool_mcp::McpManager> {
+        &self.mcp
+    }
+
+    /// Start, update or stop the project's MCP servers to match the
+    /// current config; returns their status.
+    pub async fn sync_mcp(&self, root: &Path) -> Vec<jcode_tool_mcp::ServerStatus> {
+        let settings = self.db.get_settings().unwrap_or_default();
+        let entries = {
+            let root = root.to_path_buf();
+            tokio::task::spawn_blocking(move || mcp::entries(&root, &settings)).await.unwrap_or_default()
+        };
+        self.mcp.sync(root, &entries).await
     }
 
     /// Register (or refresh) the session's policy engine. Called when a
@@ -440,6 +460,7 @@ impl AgentRuntime {
         let injected = !pending.is_empty();
         for m in pending {
             let msg = MessageRecord {
+                images: vec![],
                 id: m.id,
                 session_id: session_id.into(),
                 role: Role::User,
@@ -464,6 +485,7 @@ impl AgentRuntime {
         session_id: &str,
         content: &str,
         attachments: &[String],
+        images: Vec<ImageAttachment>,
     ) -> Result<()> {
         let session = self
             .db
@@ -500,6 +522,15 @@ impl AgentRuntime {
             .model_name
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no model selected for this session"))?;
+        if !images.is_empty() {
+            let vision = self
+                .db
+                .get_model(&format!("{}/{}", provider_cfg.id, model_name))
+                .ok()
+                .flatten()
+                .and_then(|m| m.capabilities.vision);
+            check_images(&images, vision, &model_name)?;
+        }
 
         let ws = Workspace::open(&workspace.root_path)?;
         // Per-session override (e.g. full access chosen in the chat header)
@@ -539,6 +570,7 @@ impl AgentRuntime {
         let content = content.to_string();
         let attachments = attachments.to_vec();
         tokio::spawn(async move {
+            let images = images;
             let _busy = BusyGuard {
                 runtime: runtime.clone(),
                 session_id: session_id.clone(),
@@ -547,6 +579,7 @@ impl AgentRuntime {
                 &session_id,
                 &content,
                 &attachments,
+                images,
                 &profile,
                 &provider_cfg,
                 &model_name,
@@ -588,6 +621,7 @@ impl AgentRuntime {
         session_id: &str,
         content: &str,
         attachments: &[String],
+        images: Vec<ImageAttachment>,
         profile: &AgentProfile,
         provider_cfg: &ProviderConfig,
         model_name: &str,
@@ -648,6 +682,7 @@ impl AgentRuntime {
                 .context("packing attachments")?
         };
         let user_msg = MessageRecord {
+            images,
             id: new_id(),
             session_id: session_id.into(),
             role: Role::User,
@@ -673,7 +708,7 @@ impl AgentRuntime {
         let read_only = matches!(profile.mode, AgentMode::Plan | AgentMode::Review);
         let mut tools = executor::tool_specs(read_only, profile.allowed_tools.as_deref());
         tools.retain(|t| executor::tool_rejection(profile, &t.name).is_none());
-        let system = {
+        let mut system = {
             let profile = profile.clone();
             let ws = ws.clone();
             let skills = skills.clone();
@@ -681,11 +716,46 @@ impl AgentRuntime {
                 .await
                 .context("building system prompt")?
         };
+        // MCP tools can do anything, so they stay out of Plan/Review.
+        if !read_only {
+            let root = ws.root().to_path_buf();
+            let entries = {
+                let (root, settings) = (root.clone(), settings.clone());
+                tokio::task::spawn_blocking(move || mcp::entries(&root, &settings)).await.unwrap_or_default()
+            };
+            let running = self.mcp.status(&root);
+            let starting = entries.iter().any(|e| !running.iter().any(|r| r.name == e.config.name));
+            if starting {
+                sink.status(session_id, ChatStatus::Thinking, Some("Starting MCP servers".into())).await;
+            }
+            tokio::select! {
+                _ = self.mcp.sync(&root, &entries) => {}
+                _ = cancel.cancelled() => {
+                    sink.status(session_id, ChatStatus::Idle, Some("cancelled".into())).await;
+                    return Ok(());
+                }
+            }
+            for t in self.mcp.tools(&root) {
+                if executor::tool_rejection(profile, &t.name).is_none() {
+                    tools.push(ToolSpec {
+                        name: t.name,
+                        description: format!("[MCP server: {}] {}", t.server, t.description),
+                        parameters: t.input_schema,
+                    });
+                }
+            }
+            if let Some(section) = mcp::instructions_section(&self.mcp.instructions(&root)) {
+                system.push_str(&section);
+            }
+        }
         let checkpoints = CheckpointStore::new(&self.checkpoint_base).ok();
         let mut tool_ctx =
             executor::ToolContext::new(session_id, ws.clone(), checkpoints).with_files(files).with_skills(skills.clone());
         if settings.lsp_diagnostics {
             tool_ctx = tool_ctx.with_lsp(self.lsp.clone(), settings.lsp_auto_download);
+        }
+        if !read_only {
+            tool_ctx = tool_ctx.with_mcp(self.mcp.clone());
         }
         let max_iterations = settings.max_iterations.max(1);
 
@@ -705,6 +775,7 @@ impl AgentRuntime {
                 .await;
             if let Some(summary) = summary {
                 let marker = MessageRecord {
+                    images: vec![],
                     id: new_id(),
                     session_id: session_id.into(),
                     role: Role::User,
@@ -871,6 +942,7 @@ impl AgentRuntime {
             // Persist the assistant message (skip a cancelled, empty one).
             if !(cancelled && text.is_empty()) {
                 let assistant_msg = MessageRecord {
+                    images: vec![],
                     id: assistant_id.clone(),
                     session_id: session_id.into(),
                     role: Role::Assistant,
@@ -956,6 +1028,7 @@ impl AgentRuntime {
 
             for (call, outcome_content) in tool_calls.iter().zip(outcomes) {
                 let tool_msg = MessageRecord {
+                    images: vec![],
                     id: new_id(),
                     session_id: session_id.into(),
                     role: Role::Tool,
@@ -1068,6 +1141,7 @@ impl AgentRuntime {
         history: &mut Vec<ChatMessage>,
     ) -> Result<()> {
         let msg = MessageRecord {
+            images: vec![],
             id: new_id(),
             session_id: session_id.into(),
             role: Role::Assistant,
@@ -1290,6 +1364,7 @@ fn canonical_root(path: &str) -> String {
 
 fn to_chat_message(m: MessageRecord) -> ChatMessage {
     ChatMessage {
+        images: m.images,
         role: m.role,
         content: m.content,
         tool_calls: m.tool_calls,
@@ -1297,6 +1372,30 @@ fn to_chat_message(m: MessageRecord) -> ChatMessage {
         tool_name: m.tool_name,
         reasoning: m.reasoning,
     }
+}
+
+/// Images per message, and the size of one (base64; ~5 MB of image data).
+pub const MAX_IMAGES: usize = 6;
+const MAX_IMAGE_BASE64: usize = 7_000_000;
+
+/// Refuse images the model or provider cannot take. Unknown vision support
+/// (`None`) is allowed: the provider then reports a clear error itself.
+fn check_images(images: &[ImageAttachment], vision: Option<bool>, model: &str) -> Result<()> {
+    if vision == Some(false) {
+        bail!("{model} does not accept images; pick a model with vision, or send the message without them");
+    }
+    if images.len() > MAX_IMAGES {
+        bail!("at most {MAX_IMAGES} images per message");
+    }
+    for img in images {
+        if !matches!(img.mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp") {
+            bail!("unsupported image type {} (use PNG, JPEG, GIF or WebP)", img.mime);
+        }
+        if img.data.len() > MAX_IMAGE_BASE64 {
+            bail!("an image is larger than 5 MB");
+        }
+    }
+    Ok(())
 }
 
 fn default_build_profile() -> AgentProfile {
@@ -1465,7 +1564,7 @@ mod tests {
         // The mock answers "demo" with a tool call, so a second step is
         // needed — which the limit of 1 forbids. (RecordingSink panics on
         // any error event.)
-        rt.send_message(&session_id, "please demo create a file", &[]).await.unwrap();
+        rt.send_message(&session_id, "please demo create a file", &[], vec![]).await.unwrap();
         wait_idle(&sink).await;
 
         let messages = rt.db.list_messages(&session_id).unwrap();
@@ -1487,6 +1586,7 @@ mod tests {
             for role in [Role::User, Role::Assistant] {
                 rt.db
                     .append_message(&MessageRecord {
+                        images: vec![],
                         id: new_id(),
                         session_id: session_id.clone(),
                         role,
@@ -1500,7 +1600,7 @@ mod tests {
                     .unwrap();
             }
         }
-        rt.send_message(&session_id, "hello there", &[]).await.unwrap();
+        rt.send_message(&session_id, "hello there", &[], vec![]).await.unwrap();
         wait_idle(&sink).await;
 
         let msgs = rt.db.list_messages(&session_id).unwrap();
@@ -1516,13 +1616,36 @@ mod tests {
         assert!(history.iter().all(|m| !m.content.contains("lorem ipsum")), "earlier turns replaced");
     }
 
+    #[test]
+    fn images_are_checked_before_the_turn() {
+        let png = |data: &str| ImageAttachment { mime: "image/png".into(), data: data.into() };
+        assert!(check_images(&[png("AAAA")], Some(true), "m").is_ok());
+        assert!(check_images(&[png("AAAA")], None, "m").is_ok(), "unknown vision support is allowed");
+        let err = check_images(&[png("AAAA")], Some(false), "text-only").unwrap_err();
+        assert!(err.to_string().contains("text-only does not accept images"));
+        assert!(check_images(&vec![png("AAAA"); MAX_IMAGES + 1], Some(true), "m").is_err());
+        let svg = ImageAttachment { mime: "image/svg+xml".into(), data: "AAAA".into() };
+        assert!(check_images(&[svg], Some(true), "m").is_err());
+    }
+
+    #[tokio::test]
+    async fn image_message_is_stored_with_its_images() {
+        let (rt, sink, dir, session_id) = setup().await;
+        rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Balanced);
+        let img = ImageAttachment { mime: "image/png".into(), data: "iVBORw0KGgo=".into() };
+        rt.send_message(&session_id, "what is in this screenshot?", &[], vec![img.clone()]).await.unwrap();
+        wait_idle(&sink).await;
+        let msgs = rt.db.list_messages(&session_id).unwrap();
+        assert_eq!(msgs[0].images, [img]);
+    }
+
     #[tokio::test]
     async fn steering_message_joins_the_running_turn() {
         let (rt, sink, dir, session_id) = setup().await;
         rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Safe);
         assert!(rt.steer(&session_id, "too early").is_none(), "no turn running");
 
-        rt.send_message(&session_id, "please demo create a file", &[]).await.unwrap();
+        rt.send_message(&session_id, "please demo create a file", &[], vec![]).await.unwrap();
         // The turn is held at the approval, mid-step.
         let approval = loop {
             if let Some(a) = sink.saw_approval.lock().unwrap().first() {
@@ -1551,7 +1674,7 @@ mod tests {
         // Balanced policy auto-approves writes inside the workspace.
         rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Balanced);
 
-        rt.send_message(&session_id, "please demo create a file", &[])
+        rt.send_message(&session_id, "please demo create a file", &[], vec![])
             .await
             .unwrap();
         wait_idle(&sink).await;
@@ -1577,7 +1700,7 @@ mod tests {
         let (rt, sink, dir, session_id) = setup().await;
         rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Safe);
 
-        rt.send_message(&session_id, "please demo create a file", &[])
+        rt.send_message(&session_id, "please demo create a file", &[], vec![])
             .await
             .unwrap();
 
@@ -1608,7 +1731,7 @@ mod tests {
         let (rt, sink, dir, session_id) = setup().await;
         rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Safe);
 
-        rt.send_message(&session_id, "please demo create a file", &[])
+        rt.send_message(&session_id, "please demo create a file", &[], vec![])
             .await
             .unwrap();
         let _approval = {
@@ -1641,7 +1764,7 @@ mod tests {
         // A follow-up turn no longer asks for anything.
         sink.done.store(false, Ordering::SeqCst);
         sink.saw_approval.lock().unwrap().clear();
-        rt.send_message(&session_id, "another demo task", &[])
+        rt.send_message(&session_id, "another demo task", &[], vec![])
             .await
             .unwrap();
         wait_idle(&sink).await;
@@ -1653,7 +1776,7 @@ mod tests {
         let (rt, sink, dir, session_id) = setup().await;
         rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Safe);
 
-        rt.send_message(&session_id, "please demo create a file", &[])
+        rt.send_message(&session_id, "please demo create a file", &[], vec![])
             .await
             .unwrap();
         let approval = loop {
@@ -1673,7 +1796,7 @@ mod tests {
     async fn cancellation_stops_turn() {
         let (rt, sink, _dir, session_id) = setup().await;
         rt.ensure_session_policy(&session_id, "/tmp", PolicyMode::Balanced);
-        rt.send_message(&session_id, "hello there", &[]).await.unwrap();
+        rt.send_message(&session_id, "hello there", &[], vec![]).await.unwrap();
         // Cancel quickly; mock streams in 25ms chunks.
         rt.cancel(&session_id).await.unwrap();
         wait_idle(&sink).await;
@@ -1730,7 +1853,7 @@ mod tests {
     async fn cancel_during_approval_leaves_paired_history() {
         let (rt, sink, dir, session_id) = setup().await;
         rt.ensure_session_policy(&session_id, dir.path().to_str().unwrap(), PolicyMode::Safe);
-        rt.send_message(&session_id, "please demo create a file", &[]).await.unwrap();
+        rt.send_message(&session_id, "please demo create a file", &[], vec![]).await.unwrap();
         for _ in 0..400 {
             if !sink.saw_approval.lock().unwrap().is_empty() {
                 break;
@@ -1805,7 +1928,7 @@ mod tests {
             sink.clone(),
             ckpt.path().join("ck"),
         ));
-        rt.send_message(&session.id, "hello", &[]).await.unwrap();
+        rt.send_message(&session.id, "hello", &[], vec![]).await.unwrap();
         for _ in 0..200 {
             if !rt.is_busy(&session.id) {
                 break;
@@ -1815,6 +1938,6 @@ mod tests {
         assert!(!rt.is_busy(&session.id), "busy must be cleared after a panic");
         assert!(sink.errors.lock().unwrap().iter().any(|e| e.contains("crashed")));
         // And the session accepts a new turn.
-        rt.send_message(&session.id, "again", &[]).await.unwrap();
+        rt.send_message(&session.id, "again", &[], vec![]).await.unwrap();
     }
 }

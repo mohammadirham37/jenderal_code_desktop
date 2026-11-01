@@ -235,6 +235,12 @@ pub async fn fs_search(
     .await
 }
 
+/// Files matching `query` for the chat's `@` mentions (best first).
+#[tauri::command]
+pub async fn fs_find_files(state: State<'_, AppState>, query: String) -> CmdResult<Vec<String>> {
+    with_workspace(&state, move |ws| Ok(ws.find_files(&query, 30))).await
+}
+
 #[tauri::command]
 pub async fn fs_glob(state: State<'_, AppState>, pattern: String) -> CmdResult<Vec<String>> {
     with_workspace(&state, move |ws| ws.glob_files(&pattern, 500).map_err(err)).await
@@ -580,10 +586,11 @@ pub async fn send_message(
     session_id: String,
     content: String,
     attachments: Vec<String>,
+    images: Option<Vec<jcode_common::ImageAttachment>>,
 ) -> CmdResult<()> {
     state
         .runtime
-        .send_message(&session_id, &content, &attachments)
+        .send_message(&session_id, &content, &attachments, images.unwrap_or_default())
         .await
         .map_err(err)
 }
@@ -1205,4 +1212,108 @@ mod tests {
         }
         std::fs::remove_dir_all(&base).ok();
     }
+}
+
+// ---------------------------------------------------------------------------
+// MCP servers
+// ---------------------------------------------------------------------------
+
+/// The open project's root as the agent runtime sees it (canonical), so
+/// MCP status and trust use the same key as agent turns.
+fn mcp_root(state: &AppState) -> CmdResult<std::path::PathBuf> {
+    let root = state.active_root()?;
+    root.canonicalize().map_err(err)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct McpProjectView {
+    pub path: String,
+    pub servers: Vec<jcode_tool_mcp::ServerConfig>,
+    pub error: Option<String>,
+    pub trusted: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct McpOverview {
+    pub global_path: Option<String>,
+    pub global: Vec<jcode_tool_mcp::ServerConfig>,
+    pub global_error: Option<String>,
+    pub project: Option<McpProjectView>,
+    pub disabled: Vec<String>,
+    pub status: Vec<jcode_tool_mcp::ServerStatus>,
+}
+
+/// Configured servers and the state of the running ones (starts nothing).
+#[tauri::command]
+pub async fn mcp_overview(state: State<'_, AppState>) -> CmdResult<McpOverview> {
+    let root = mcp_root(&state).ok();
+    let settings = state.db.get_settings().map_err(err)?;
+    let status = root.as_deref().map(|r| state.runtime.mcp().status(r)).unwrap_or_default();
+    blocking(move || {
+        use jcode_agent_runtime::mcp;
+        let (global, global_error) = match mcp::load_global() {
+            Ok(g) => (g, None),
+            Err(e) => (vec![], Some(format!("{e:#}"))),
+        };
+        let project = root.as_deref().and_then(mcp::project_file).map(|p| {
+            let trusted = root.as_deref().is_some_and(|r| mcp::is_trusted(&settings, r, &p.fingerprint));
+            let (servers, error) = match p.servers {
+                Ok(s) => (s, None),
+                Err(e) => (vec![], Some(format!("{e:#}"))),
+            };
+            McpProjectView { path: p.path.display().to_string(), servers, error, trusted }
+        });
+        Ok(McpOverview {
+            global_path: mcp::global_path().map(|p| p.display().to_string()),
+            global,
+            global_error,
+            project,
+            disabled: settings.disabled_mcp_servers,
+            status,
+        })
+    })
+    .await
+}
+
+/// Start/stop servers to match the config; waits until they are up.
+#[tauri::command]
+pub async fn mcp_sync(state: State<'_, AppState>) -> CmdResult<Vec<jcode_tool_mcp::ServerStatus>> {
+    let root = mcp_root(&state)?;
+    Ok(state.runtime.sync_mcp(&root).await)
+}
+
+#[tauri::command]
+pub async fn mcp_restart(state: State<'_, AppState>, name: String) -> CmdResult<Vec<jcode_tool_mcp::ServerStatus>> {
+    let root = mcp_root(&state)?;
+    state.runtime.sync_mcp(&root).await;
+    Ok(state.runtime.mcp().restart(&root, &name).await)
+}
+
+/// Replace the global servers (`~/.config/jenderalcode/mcp.json`).
+#[tauri::command]
+pub async fn mcp_save_global(servers: Vec<jcode_tool_mcp::ServerConfig>) -> CmdResult<()> {
+    blocking(move || {
+        let path = jcode_agent_runtime::mcp::global_path().ok_or("no home directory")?;
+        jcode_tool_mcp::config::save(&path, &servers).map_err(err)
+    })
+    .await
+}
+
+/// Trust (or stop trusting) the open project's current `.mcp.json`.
+#[tauri::command]
+pub async fn mcp_trust_project(state: State<'_, AppState>, trusted: bool) -> CmdResult<()> {
+    let root = mcp_root(&state)?;
+    let db = state.db.clone();
+    blocking(move || {
+        use jcode_agent_runtime::mcp;
+        let mut settings = db.get_settings().map_err(err)?;
+        let fingerprint = if trusted {
+            Some(mcp::project_file(&root).ok_or("this project has no .mcp.json")?.fingerprint)
+        } else {
+            None
+        };
+        mcp::set_trusted(&mut settings, &root, fingerprint.as_deref());
+        db.save_settings(&settings).map_err(err)
+    })
+    .await
 }

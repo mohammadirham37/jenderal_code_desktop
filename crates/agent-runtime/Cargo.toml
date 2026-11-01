@@ -17,6 +17,7 @@ jcode-tool-filesystem = { workspace = true }
 jcode-tool-terminal = { workspace = true }
 jcode-tool-git = { workspace = true }
 jcode-tool-lsp = { workspace = true }
+jcode-tool-mcp = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }

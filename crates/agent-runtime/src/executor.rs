@@ -34,6 +34,8 @@ pub struct ToolContext {
     pub lsp: Option<(Arc<jcode_tool_lsp::LspManager>, bool)>,
     /// Skills the agent can load with the `skill` tool.
     pub skills: Arc<Vec<crate::skills::Skill>>,
+    /// MCP servers whose tools the agent may call (`mcp__server__tool`).
+    pub mcp: Option<Arc<jcode_tool_mcp::McpManager>>,
 }
 
 /// Size and modification time of a file when the agent last saw it.
@@ -63,7 +65,13 @@ impl ToolContext {
             files: SharedFileTracker::default(),
             lsp: None,
             skills: Arc::default(),
+            mcp: None,
         }
+    }
+
+    pub fn with_mcp(mut self, mcp: Arc<jcode_tool_mcp::McpManager>) -> Self {
+        self.mcp = Some(mcp);
+        self
     }
 
     pub fn with_skills(mut self, skills: Arc<Vec<crate::skills::Skill>>) -> Self {
@@ -338,7 +346,7 @@ pub fn tool_specs(read_only: bool, allowed: Option<&[String]>) -> Vec<ToolSpec> 
 /// and kept out of Plan via that profile's tool allowlist; the permission
 /// engine still gates every command.
 pub fn is_read_only_tool(name: &str) -> bool {
-    !matches!(name, "fs_write" | "fs_edit" | "fs_multi_edit" | "fs_delete")
+    !matches!(name, "fs_write" | "fs_edit" | "fs_multi_edit" | "fs_delete") && !jcode_tool_mcp::is_mcp_tool(name)
 }
 
 /// Tools that only read and never wait on the user in the common case, so a
@@ -359,7 +367,12 @@ pub fn is_parallel_safe(name: &str) -> bool {
 ///   [`is_read_only_tool`]).
 pub fn tool_rejection(profile: &AgentProfile, name: &str) -> Option<String> {
     if let Some(allowed) = &profile.allowed_tools {
-        if !allowed.iter().any(|a| a == name) {
+        // `mcp` in an allowlist enables every MCP tool, `mcp__<server>` one
+        // server's tools.
+        let mcp_allowed = jcode_tool_mcp::server_of(name).is_some_and(|server| {
+            allowed.iter().any(|a| a == "mcp" || *a == format!("mcp__{server}"))
+        });
+        if !mcp_allowed && !allowed.iter().any(|a| a == name) {
             return Some(format!(
                 "Tool `{name}` is not enabled for the `{}` agent profile.",
                 profile.name
@@ -456,6 +469,10 @@ pub fn classify(name: &str, args: &Value, ctx: &ToolContext) -> Result<Action> {
             })
         }
         "web_fetch" => Ok(Action::FetchUrl { url: get_str(args, "url")?.trim().to_string() }),
+        mcp if jcode_tool_mcp::is_mcp_tool(mcp) => Ok(Action::McpTool {
+            server: jcode_tool_mcp::server_of(mcp).unwrap_or_default().to_string(),
+            tool: mcp.to_string(),
+        }),
         "fs_write" | "fs_edit" | "fs_multi_edit" => {
             let path = get_str(args, "path")?;
             let ClassifiedPath { path: p, inside, .. } = classify_path(&ctx.workspace, &path);
@@ -490,6 +507,14 @@ pub fn classify(name: &str, args: &Value, ctx: &ToolContext) -> Result<Action> {
 /// Produce a human-readable preview for an approval card (diff for edits,
 /// command line for terminal). Does not mutate anything.
 pub fn preview(name: &str, args: &Value, ctx: &ToolContext) -> Option<String> {
+    if jcode_tool_mcp::is_mcp_tool(name) {
+        let pretty = serde_json::to_string_pretty(args).ok()?;
+        return Some(if pretty.len() > 4_000 {
+            format!("{}\n…", &pretty[..pretty.floor_char_boundary(4_000)])
+        } else {
+            pretty
+        });
+    }
     match name {
         "fs_write" => {
             let path = get_str(args, "path").ok()?;
@@ -593,6 +618,9 @@ pub async fn execute(
     if name == "web_fetch" {
         return run_web_fetch(args, cancel).await;
     }
+    if jcode_tool_mcp::is_mcp_tool(name) {
+        return run_mcp(name, args, ctx, cancel).await;
+    }
     // Filesystem and git tools do blocking I/O (and spawn `git`): keep them
     // off the async executor threads.
     let name = name.to_string();
@@ -664,6 +692,24 @@ async fn run_terminal(args: &Value, ws: &Workspace, cancel: &CancelToken) -> Res
     Ok(ToolOutcome {
         summary,
         result_for_model: truncate_middle_for_model(&body),
+        diff: None,
+    })
+}
+
+async fn run_mcp(name: &str, args: &Value, ctx: &ToolContext, cancel: &CancelToken) -> Result<ToolOutcome> {
+    let mcp = ctx.mcp.as_ref().ok_or_else(|| anyhow!("MCP tools are not available here"))?;
+    let (text, is_error) = tokio::select! {
+        r = mcp.call(ctx.workspace.root(), name, args.clone()) => r?,
+        _ = cancel.cancelled() => bail!("cancelled"),
+    };
+    if is_error {
+        bail!("{}", if text.trim().is_empty() { "the MCP tool reported an error" } else { text.trim() });
+    }
+    let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("done");
+    let summary: String = first.chars().take(120).collect();
+    Ok(ToolOutcome {
+        summary,
+        result_for_model: truncate_middle_for_model(if text.is_empty() { "(no output)" } else { &text }),
         diff: None,
     })
 }
@@ -1247,6 +1293,65 @@ mod tests {
         assert!(tool_rejection(&build, "fs_read").is_none());
         assert!(tool_rejection(&build, "terminal_run").is_some());
         assert!(tool_rejection(&profile(AgentMode::Build, None), "fs_write").is_none());
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_execute_through_the_manager() {
+        if std::process::Command::new("python3").arg("--version").output().is_err() {
+            return;
+        }
+        let (_t, c) = ctx();
+        let server = r#"
+import json, sys
+for line in sys.stdin:
+    m = json.loads(line); i = m.get("id"); method = m.get("method")
+    if method == "initialize":
+        r = {"protocolVersion": "2025-06-18", "serverInfo": {"name": "fake"}}
+    elif method == "tools/list":
+        r = {"tools": [{"name": "greet", "inputSchema": {"type": "object"}}]}
+    elif method == "tools/call":
+        who = m["params"]["arguments"].get("who")
+        r = {"content": [{"type": "text", "text": "hello " + who}]} if who else {"isError": True, "content": [{"type": "text", "text": "who is missing"}]}
+    else:
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": i, "result": r}), flush=True)
+"#;
+        std::fs::write(c.workspace.root().join("fake_mcp.py"), server).unwrap();
+        let mgr = Arc::new(jcode_tool_mcp::McpManager::new());
+        mgr.sync(
+            c.workspace.root(),
+            &[jcode_tool_mcp::ServerEntry {
+                scope: jcode_tool_mcp::Scope::Global,
+                config: jcode_tool_mcp::config::parse(r#"{"mcpServers": {"fake": {"command": "python3", "args": ["fake_mcp.py"]}}}"#)
+                    .unwrap()
+                    .remove(0),
+            }],
+        )
+        .await;
+        let c = c.with_mcp(mgr);
+        let cancel = CancelToken::new();
+        let out = execute("mcp__fake__greet", &json!({"who": "jenderal"}), &c, &cancel).await.unwrap();
+        assert_eq!(out.result_for_model, "hello jenderal");
+        assert_eq!(out.summary, "hello jenderal");
+        let err = execute("mcp__fake__greet", &json!({}), &c, &cancel).await.err().unwrap();
+        assert!(format!("{err:#}").contains("who is missing"));
+        assert!(execute("mcp__fake__nope", &json!({}), &c, &cancel).await.is_err());
+    }
+
+    #[test]
+    fn mcp_tools_follow_mode_and_allowlist() {
+        let name = "mcp__playwright__browser_click";
+        assert!(tool_rejection(&profile(AgentMode::Build, None), name).is_none());
+        assert!(tool_rejection(&profile(AgentMode::Plan, None), name).is_some());
+        assert!(tool_rejection(&profile(AgentMode::Review, None), name).is_some());
+        assert!(tool_rejection(&profile(AgentMode::Build, Some(vec!["fs_read"])), name).is_some());
+        assert!(tool_rejection(&profile(AgentMode::Build, Some(vec!["mcp"])), name).is_none());
+        assert!(tool_rejection(&profile(AgentMode::Build, Some(vec!["mcp__playwright"])), name).is_none());
+        assert!(tool_rejection(&profile(AgentMode::Build, Some(vec!["mcp__other"])), name).is_some());
+        let (_t, c) = ctx();
+        let action = classify(name, &json!({"element": "Login"}), &c).unwrap();
+        assert!(matches!(action, Action::McpTool { ref server, ref tool } if server == "playwright" && tool == name));
+        assert!(preview(name, &json!({"element": "Login"}), &c).unwrap().contains("\"element\": \"Login\""));
     }
 
     #[test]

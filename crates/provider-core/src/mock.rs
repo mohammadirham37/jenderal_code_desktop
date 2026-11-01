@@ -125,7 +125,7 @@ impl super::AiProvider for MockProvider {
             capabilities: jcode_common::ModelCapabilities {
                 streaming: Some(true),
                 tool_calling: Some(true),
-                vision: Some(false),
+                vision: Some(true),
                 structured_output: Some(true),
                 context_window: Some(128_000),
                 max_output_tokens: Some(4_096),

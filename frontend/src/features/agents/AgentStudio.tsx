@@ -18,6 +18,7 @@ const ALL_TOOLS = [
   "git_status",
   "git_diff",
   "git_log",
+  "mcp",
 ];
 
 const POLICY_HINT: Record<PolicyMode, string> = {

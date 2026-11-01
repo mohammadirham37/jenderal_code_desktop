@@ -22,6 +22,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("009_profile_new_tools", include_str!("../migrations/009_profile_new_tools.sql")),
     ("010_profile_task_tool", include_str!("../migrations/010_profile_task_tool.sql")),
     ("011_profile_skill_tool", include_str!("../migrations/011_profile_skill_tool.sql")),
+    ("012_message_images", include_str!("../migrations/012_message_images.sql")),
 ];
 
 pub struct Db {
@@ -639,8 +640,8 @@ impl Db {
     pub fn append_message(&self, m: &MessageRecord) -> Result<()> {
         self.with_conn(|conn| {
             conn.prepare_cached(
-                "INSERT INTO messages(id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at, reasoning)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO messages(id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at, reasoning, images_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?
             .execute(params![
                     m.id,
@@ -656,6 +657,11 @@ impl Db {
                     m.tool_name,
                     m.created_at,
                     m.reasoning,
+                    if m.images.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::to_string(&m.images)?)
+                    },
                 ])?;
             conn.prepare_cached("UPDATE sessions SET updated_at = ?2 WHERE id = ?1")?
                 .execute(params![m.session_id, now_ms()])?;
@@ -675,13 +681,17 @@ impl Db {
     pub fn list_messages(&self, session_id: &str) -> Result<Vec<MessageRecord>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare_cached(
-                "SELECT id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at, reasoning
+                "SELECT id, session_id, role, content, tool_calls_json, tool_call_id, tool_name, created_at, reasoning, images_json
                  FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
             )?;
             let rows = stmt.query_map(params![session_id], |r| {
                 let role: String = r.get(2)?;
                 let tools_json: Option<String> = r.get(4)?;
                 Ok(MessageRecord {
+                    images: r
+                        .get::<_, Option<String>>(9)?
+                        .and_then(|j| serde_json::from_str(&j).ok())
+                        .unwrap_or_default(),
                     id: r.get(0)?,
                     session_id: r.get(1)?,
                     role: match role.as_str() {
@@ -1208,6 +1218,7 @@ mod tests {
         let s = d.create_session(&w.id, "plain title", None, None, None).unwrap();
         assert_eq!(d.message_count(&s.id).unwrap(), 0);
         let m = MessageRecord {
+            images: vec![],
             id: new_id(),
             session_id: s.id.clone(),
             role: Role::User,
@@ -1225,6 +1236,32 @@ mod tests {
         // `_` and `%` must be literal, not wildcards.
         assert!(d.search_sessions("done_o_").unwrap().is_empty());
         assert!(d.search_sessions("1%done").unwrap().is_empty());
+    }
+
+    #[test]
+    fn message_images_round_trip() {
+        let d = db();
+        let w = d.upsert_workspace("/tmp/p-img", "p").unwrap();
+        let s = d.create_session(&w.id, "t", None, None, None).unwrap();
+        let image = jcode_common::ImageAttachment { mime: "image/png".into(), data: "iVBORw0KGgo=".into() };
+        for images in [vec![image.clone()], vec![]] {
+            d.append_message(&MessageRecord {
+                images,
+                id: new_id(),
+                session_id: s.id.clone(),
+                role: Role::User,
+                content: "look".into(),
+                tool_calls: vec![],
+                tool_call_id: None,
+                tool_name: None,
+                reasoning: None,
+                created_at: now_ms(),
+            })
+            .unwrap();
+        }
+        let msgs = d.list_messages(&s.id).unwrap();
+        assert_eq!(msgs[0].images, [image]);
+        assert!(msgs[1].images.is_empty());
     }
 
     #[test]
@@ -1305,6 +1342,7 @@ mod tests {
         let s = d.create_session(&w.id, "t", None, None, None).unwrap();
         for reasoning in [Some("thinking about it".to_string()), None] {
             d.append_message(&MessageRecord {
+                images: vec![],
                 id: new_id(),
                 session_id: s.id.clone(),
                 role: Role::Assistant,
@@ -1386,6 +1424,7 @@ mod tests {
             .create_session(&w.id, "My session", None, Some("prov1"), Some("gpt-4o"))
             .unwrap();
         let m = MessageRecord {
+            images: vec![],
             id: new_id(),
             session_id: s.id.clone(),
             role: Role::User,
@@ -1554,6 +1593,7 @@ mod tests {
         let w = d.upsert_workspace("/tmp/p5", "p5").unwrap();
         let s = d.create_session(&w.id, "s", None, None, None).unwrap();
         d.append_message(&MessageRecord {
+            images: vec![],
             id: new_id(),
             session_id: s.id,
             role: Role::Assistant,

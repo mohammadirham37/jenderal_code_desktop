@@ -13,6 +13,7 @@ import {
   Bot,
   Globe,
   ListChecks,
+  Plug,
   Loader2,
   Search,
   ShieldAlert,
@@ -43,6 +44,12 @@ const TOOL_META: Record<string, { icon: typeof FileEdit; label: string }> = {
   git_log: { icon: GitBranch, label: "Git log" },
 };
 
+/** `mcp__playwright__browser_click` → "playwright · browser_click". */
+function mcpMeta(name: string): { icon: typeof FileEdit; label: string } | null {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  return m ? { icon: Plug, label: `${m[1]} · ${m[2]}` } : null;
+}
+
 export function statusVisual(status: ToolRunRecord["status"]) {
   switch (status) {
     case "success":
@@ -72,7 +79,7 @@ export function ToolRunCard({
   onOpenDiff?: (key: string, title: string, diff: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const meta = TOOL_META[run.tool_name] ?? { icon: Terminal, label: run.tool_name };
+  const meta = TOOL_META[run.tool_name] ?? mcpMeta(run.tool_name) ?? { icon: Terminal, label: run.tool_name };
   const Icon = meta.icon;
   const visual = statusVisual(run.status);
   const pathArg = (run.args?.path as string) ?? null;

@@ -78,7 +78,7 @@ async fn full_stack_user_journey() -> anyhow::Result<()> {
 
     // --- Ask for a demo file; Safe policy must ask for approval. ---
     runtime
-        .send_message(&session.id, "please demo create a file", &[])
+        .send_message(&session.id, "please demo create a file", &[], vec![])
         .await?;
 
     let approval = wait_for(|| sink.approvals.lock().unwrap().first().cloned(), 10_000)
@@ -158,7 +158,7 @@ async fn balanced_policy_edits_auto_commands_ask() -> anyhow::Result<()> {
 
     for prompt in ["please demo create a file", "demo again please"] {
         sink.idle.store(false, Ordering::SeqCst);
-        runtime.send_message(&session.id, prompt, &[]).await?;
+        runtime.send_message(&session.id, prompt, &[], vec![]).await?;
         wait_for(|| sink.idle.load(Ordering::SeqCst).then_some(true), 10_000)
             .await
             .expect("turn reached idle");

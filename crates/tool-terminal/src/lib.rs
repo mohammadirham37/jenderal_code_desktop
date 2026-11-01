@@ -324,6 +324,25 @@ impl HeadTail {
     }
 }
 
+/// Kill a process and its process group right away (for processes spawned
+/// with `process_group(0)`), from synchronous code such as `Drop`.
+pub fn kill_tree_now(pid: u32) {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        if kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL).is_err() {
+            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status();
+    }
+}
+
 async fn kill_process_tree(pid: Option<u32>) {
     let Some(pid) = pid else { return };
     #[cfg(unix)]

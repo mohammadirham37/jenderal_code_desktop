@@ -62,7 +62,17 @@ impl OpenAiProvider {
         for m in &request.messages {
             match m.role {
                 Role::System => out.push(json!({"role": "system", "content": m.content})),
-                Role::User => out.push(json!({"role": "user", "content": m.content})),
+                Role::User if m.images.is_empty() => out.push(json!({"role": "user", "content": m.content})),
+                Role::User => {
+                    let mut parts = vec![json!({"type": "text", "text": m.content})];
+                    for img in &m.images {
+                        parts.push(json!({
+                            "type": "image_url",
+                            "image_url": {"url": format!("data:{};base64,{}", img.mime, img.data)}
+                        }));
+                    }
+                    out.push(json!({"role": "user", "content": parts}));
+                }
                 Role::Assistant => {
                     let mut msg = if m.tool_calls.is_empty() {
                         json!({"role": "assistant", "content": m.content})
@@ -371,6 +381,24 @@ fn truncate(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_images_become_image_url_parts() {
+        let mut m = ChatMessage::new(Role::User, "what is this?");
+        m.images.push(jcode_common::ImageAttachment { mime: "image/png".into(), data: "AAAA".into() });
+        let req = ModelRequest {
+            model: "m".into(),
+            messages: vec![m],
+            tools: vec![],
+            system: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let msgs = OpenAiProvider::convert_messages(&req);
+        let parts = msgs.last().unwrap()["content"].as_array().unwrap().clone();
+        assert_eq!(parts[0]["text"], "what is this?");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
     use jcode_common::ChatMessage;
     use jcode_common::{ToolCall, ToolSpec};
 
@@ -380,6 +408,7 @@ mod tests {
             messages: vec![
                 ChatMessage::new(Role::User, "hi"),
                 ChatMessage {
+                    images: vec![],
                     role: Role::Assistant,
                     content: "".into(),
                     tool_calls: vec![ToolCall {
@@ -392,6 +421,7 @@ mod tests {
                     reasoning: None,
                 },
                 ChatMessage {
+                    images: vec![],
                     role: Role::Tool,
                     content: "file body".into(),
                     tool_calls: vec![],

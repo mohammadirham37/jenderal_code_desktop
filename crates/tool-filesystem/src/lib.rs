@@ -564,6 +564,56 @@ impl Workspace {
         }
         Ok(out)
     }
+
+    /// Files whose path matches `query`, best first: the query in the file
+    /// name, then anywhere in the path, then as a subsequence (`chpnl` →
+    /// `ChatPanel.tsx`); shorter paths win ties. For `@` mentions.
+    pub fn find_files(&self, query: &str, max: usize) -> Vec<String> {
+        const MAX_WALK: usize = 100_000;
+        let q = query.trim().to_lowercase();
+        let walker = WalkBuilder::new(&self.root)
+            .hidden(false)
+            .git_ignore(true)
+            .require_git(false)
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                !e.file_type().is_some_and(|t| t.is_dir()) || !(is_ignored_dir(&name) || name == ".git")
+            })
+            .build();
+        let mut scored: Vec<(u8, usize, String)> = Vec::new();
+        for entry in walker.flatten().take(MAX_WALK) {
+            // Secret-like files are left out: picking one would send it to
+            // the provider.
+            if entry.path_is_symlink()
+                || !entry.file_type().is_some_and(|t| t.is_file())
+                || is_sensitive_name(entry.path())
+            {
+                continue;
+            }
+            let rel = self.rel_string(entry.path());
+            let lower = rel.to_lowercase();
+            let name = lower.rsplit('/').next().unwrap_or(&lower);
+            let score = if q.is_empty() || name.starts_with(&q) {
+                0
+            } else if name.contains(&q) {
+                1
+            } else if lower.contains(&q) {
+                2
+            } else if is_subsequence(&q, &lower) {
+                3
+            } else {
+                continue;
+            };
+            scored.push((score, rel.len(), rel));
+        }
+        scored.sort();
+        scored.into_iter().take(max).map(|(_, _, p)| p).collect()
+    }
+}
+
+fn is_subsequence(needle: &str, hay: &str) -> bool {
+    let mut it = hay.chars();
+    needle.chars().all(|c| it.any(|h| h == c))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -924,6 +974,24 @@ impl CheckpointStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_files_ranks_name_matches_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for f in ["src/features/chat/ChatPanel.tsx", "src/chat.ts", "docs/panel-guide.md", "node_modules/x/chat.js", ".prettierrc", ".env"] {
+            std::fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            std::fs::write(root.join(f), "x").unwrap();
+        }
+        let ws = Workspace::open(root).unwrap();
+        assert_eq!(ws.find_files("chat", 10), ["src/chat.ts", "src/features/chat/ChatPanel.tsx"]);
+        assert_eq!(ws.find_files("panel", 10), ["docs/panel-guide.md", "src/features/chat/ChatPanel.tsx"]);
+        assert_eq!(ws.find_files("chpnl", 10), ["src/features/chat/ChatPanel.tsx"]);
+        let all = ws.find_files("", 10);
+        assert!(all.contains(&".prettierrc".to_string()), "dotfiles are listed");
+        assert!(!all.contains(&".env".to_string()), "secrets are not");
+        assert_eq!(ws.find_files("", 2).len(), 2);
+    }
 
     fn ws() -> (tempfile::TempDir, Workspace) {
         let dir = tempfile::tempdir().unwrap();

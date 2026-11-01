@@ -21,6 +21,7 @@ jcode-tool-filesystem = { workspace = true }
 jcode-tool-terminal = { workspace = true }
 jcode-tool-git = { workspace = true }
 jcode-agent-runtime = { workspace = true }
+jcode-tool-mcp = { workspace = true }
 jcode-agent-cli = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }

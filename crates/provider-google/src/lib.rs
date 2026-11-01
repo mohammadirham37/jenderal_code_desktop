@@ -57,18 +57,19 @@ impl GoogleProvider {
             match m.role {
                 Role::System => continue, // handled via systemInstruction
                 Role::User => {
+                    let mut parts = vec![json!({"text": m.content})];
+                    for img in &m.images {
+                        parts.push(json!({"inlineData": {"mimeType": img.mime, "data": img.data}}));
+                    }
                     // A user message right after function responses
                     // (steering) joins their turn.
                     if let Some(last) = out.last_mut() {
                         if last["role"] == "user" && last["parts"].is_array() {
-                            last["parts"].as_array_mut().unwrap().push(json!({"text": m.content}));
+                            last["parts"].as_array_mut().unwrap().extend(parts);
                             continue;
                         }
                     }
-                    out.push(json!({
-                        "role": "user",
-                        "parts": [{"text": m.content}]
-                    }));
+                    out.push(json!({ "role": "user", "parts": parts }));
                 }
                 Role::Assistant => {
                     if m.tool_calls.is_empty() {
@@ -382,6 +383,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_images_become_inline_data() {
+        let mut m = ChatMessage::new(Role::User, "what is this?");
+        m.images.push(jcode_common::ImageAttachment { mime: "image/png".into(), data: "AAAA".into() });
+        let req = ModelRequest {
+            model: "m".into(),
+            messages: vec![m],
+            tools: vec![],
+            system: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let contents = GoogleProvider::convert_contents(&req).unwrap();
+        let parts = contents[0]["parts"].as_array().unwrap();
+        assert_eq!(parts[0]["text"], "what is this?");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+    }
     use jcode_common::ChatMessage;
     use jcode_common::{ToolCall, ToolSpec};
 
@@ -392,6 +411,7 @@ mod tests {
             messages: vec![
                 ChatMessage::new(Role::User, "go"),
                 ChatMessage {
+                    images: vec![],
                     role: Role::Assistant,
                     content: String::new(),
                     tool_calls: vec![ToolCall {
@@ -404,6 +424,7 @@ mod tests {
                     reasoning: None,
                 },
                 ChatMessage {
+                    images: vec![],
                     role: Role::Tool,
                     content: "file content here".into(),
                     tool_calls: vec![],

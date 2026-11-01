@@ -244,10 +244,22 @@ pub struct ToolCall {
 }
 
 /// A chat message in the internal (provider-neutral) format.
+/// An image in a user message: base64 data and its MIME type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageAttachment {
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+    pub mime: String,
+    /// Base64, without a `data:` prefix.
+    pub data: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
+    /// Images pasted into a user message (for models with vision).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ImageAttachment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCall>,
     /// Set for `Tool` role messages.
@@ -266,6 +278,7 @@ impl ChatMessage {
         Self {
             role,
             content: content.into(),
+            images: Vec::new(),
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
@@ -281,6 +294,8 @@ pub struct MessageRecord {
     pub session_id: String,
     pub role: Role,
     pub content: String,
+    #[serde(default)]
+    pub images: Vec<ImageAttachment>,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
@@ -621,6 +636,21 @@ pub struct AppSettings {
     /// Skill names hidden from the agent.
     #[serde(default)]
     pub disabled_skills: Vec<String>,
+    /// MCP server names (global or project) the agent does not use.
+    #[serde(default)]
+    pub disabled_mcp_servers: Vec<String>,
+    /// Projects whose `.mcp.json` the user allowed to run. Tied to the
+    /// file's content: an edited file needs approval again.
+    #[serde(default)]
+    pub mcp_trusted_projects: Vec<McpProjectTrust>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpProjectTrust {
+    pub root: String,
+    /// FNV-1a of the approved `.mcp.json`, hex (a u64 would lose precision
+    /// in JavaScript).
+    pub fingerprint: String,
 }
 
 fn default_true() -> bool {
@@ -665,6 +695,8 @@ impl Default for AppSettings {
             lsp_diagnostics: true,
             lsp_auto_download: true,
             disabled_skills: Vec::new(),
+            disabled_mcp_servers: Vec::new(),
+            mcp_trusted_projects: Vec::new(),
         }
     }
 }

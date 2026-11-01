@@ -77,21 +77,27 @@ impl AnthropicProvider {
                     }));
                 }
                 Role::User => {
+                    // Images first: Anthropic recommends them before the text.
+                    let mut blocks: Vec<Value> = m
+                        .images
+                        .iter()
+                        .map(|img| {
+                            json!({
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": img.mime, "data": img.data}
+                            })
+                        })
+                        .collect();
+                    blocks.push(json!({"type": "text", "text": m.content}));
                     // A user message right after tool results (steering)
                     // joins their turn: roles must alternate.
                     if let Some(last) = out.last_mut() {
                         if last["role"] == "user" && last["content"].is_array() {
-                            last["content"]
-                                .as_array_mut()
-                                .unwrap()
-                                .push(json!({"type": "text", "text": m.content}));
+                            last["content"].as_array_mut().unwrap().extend(blocks);
                             continue;
                         }
                     }
-                    out.push(json!({
-                        "role": "user",
-                        "content": [{"type": "text", "text": m.content}]
-                    }));
+                    out.push(json!({ "role": "user", "content": blocks }));
                 }
                 Role::Assistant => {
                     let mut blocks = Vec::new();
@@ -428,6 +434,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_images_become_base64_image_blocks() {
+        let mut m = ChatMessage::new(Role::User, "what is this?");
+        m.images.push(jcode_common::ImageAttachment { mime: "image/png".into(), data: "AAAA".into() });
+        let req = ModelRequest {
+            model: "m".into(),
+            messages: vec![m],
+            tools: vec![],
+            system: None,
+            temperature: None,
+            max_tokens: None,
+        };
+        let msgs = AnthropicProvider::convert_messages(&req).unwrap();
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[0]["source"]["data"], "AAAA");
+        assert_eq!(blocks[1]["text"], "what is this?");
+    }
     use jcode_common::ChatMessage;
     use jcode_common::{ToolCall, ToolSpec};
 
@@ -438,6 +464,7 @@ mod tests {
             messages: vec![
                 ChatMessage::new(Role::User, "hi"),
                 ChatMessage {
+                    images: vec![],
                     role: Role::Assistant,
                     content: "let me check".into(),
                     tool_calls: vec![
@@ -457,6 +484,7 @@ mod tests {
                     reasoning: None,
                 },
                 ChatMessage {
+                    images: vec![],
                     role: Role::Tool,
                     content: "A".into(),
                     tool_calls: vec![],
@@ -465,6 +493,7 @@ mod tests {
                     reasoning: None,
                 },
                 ChatMessage {
+                    images: vec![],
                     role: Role::Tool,
                     content: "B".into(),
                     tool_calls: vec![],
@@ -502,6 +531,7 @@ mod tests {
             messages: vec![
                 ChatMessage::new(Role::User, "hi"),
                 ChatMessage {
+                    images: vec![],
                     role: Role::Assistant,
                     content: String::new(),
                     tool_calls: vec![ToolCall {
@@ -514,6 +544,7 @@ mod tests {
                     reasoning: None,
                 },
                 ChatMessage {
+                    images: vec![],
                     role: Role::Tool,
                     content: "A".into(),
                     tool_calls: vec![],
