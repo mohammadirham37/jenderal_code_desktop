@@ -49,6 +49,8 @@ interface ChatState {
   /** Token usage of the active session (null until loaded). */
   usage: SessionUsage | null;
   initialized: boolean;
+  /** The session list has been loaded at least once. */
+  sessionsLoaded: boolean;
   /** Per session: messages waiting for the running turn to end. */
   queued: Record<string, QueuedMessage[]>;
   /** Per session: steering messages not yet added to the conversation. */
@@ -95,6 +97,9 @@ function scheduleSessionsRefresh(load: () => Promise<void>) {
   }, 400);
 }
 
+/** The session last open in a project, selected again when it reopens. */
+export const lastSessionKey = (workspaceId: string) => `jcode:last-session:${workspaceId}`;
+
 /** Sessions with a running turn, from status events of every session. */
 const running = new Set<string>();
 
@@ -130,6 +135,7 @@ export const useChat = create<ChatState>((set, get) => ({
   lastError: null,
   usage: null,
   initialized: false,
+  sessionsLoaded: false,
   queued: {},
   steering: {},
   queueHeld: {},
@@ -252,7 +258,7 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   loadSessions: async (workspaceId) => {
-    set({ sessions: await api.listSessions(workspaceId) });
+    set({ sessions: await api.listSessions(workspaceId), sessionsLoaded: true });
   },
 
   loadProfiles: async () => {
@@ -276,6 +282,7 @@ export const useChat = create<ChatState>((set, get) => ({
       statusDetail: null,
       lastError: null,
     });
+    localStorage.setItem(lastSessionKey(detail.session.workspace_id), id);
   },
 
   newSession: async (workspaceId, agentProfileId, providerId, modelName) => {

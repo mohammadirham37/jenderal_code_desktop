@@ -51,6 +51,16 @@ export function AgentCliSettings() {
               onBlur={() => save(draft)}
             />
           </div>
+          <div className="w-36 shrink-0">
+            <input
+              className={`${inputClass} font-mono`}
+              value={a.resume_args ?? ""}
+              placeholder="resume args"
+              title="Used when a tab is restored after the app restarts, to continue the last conversation (e.g. --continue)"
+              onChange={(e) => edit(i, { resume_args: e.target.value })}
+              onBlur={() => save(draft)}
+            />
+          </div>
           <IconButton title="Remove" onClick={() => save(draft.filter((_, j) => j !== i))}>
             <Trash2 size={12} />
           </IconButton>
@@ -61,7 +71,7 @@ export function AgentCliSettings() {
         onClick={() =>
           save([
             ...draft,
-            { id: `custom-${Date.now().toString(36)}`, name: "New agent", command: "", enabled: true, bypass_args: null },
+            { id: `custom-${Date.now().toString(36)}`, name: "New agent", command: "", enabled: true, bypass_args: null, resume_args: null },
           ])
         }
       >

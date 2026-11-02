@@ -487,6 +487,11 @@ pub struct AgentCli {
     /// permissions" (e.g. `--dangerously-skip-permissions`).
     #[serde(default)]
     pub bypass_args: Option<String>,
+    /// Arguments that continue the CLI's last conversation in the folder
+    /// (e.g. `--continue`), used when a tab is restored after a restart.
+    /// They come before `bypass_args` (`codex resume --last <flags>`).
+    #[serde(default)]
+    pub resume_args: Option<String>,
 }
 
 fn default_agent_enabled() -> bool {
@@ -495,21 +500,22 @@ fn default_agent_enabled() -> bool {
 
 pub fn default_agent_clis() -> Vec<AgentCli> {
     [
-        ("claude", "Claude", "claude", Some("--dangerously-skip-permissions")),
-        ("codex", "Codex", "codex", Some("--dangerously-bypass-approvals-and-sandbox")),
-        ("opencode", "OpenCode", "opencode", Some("--auto")),
-        ("antigravity", "Antigravity", "agy", Some("--dangerously-skip-permissions")),
-        ("gemini", "Gemini", "gemini", None),
-        ("goose", "Goose", "goose session", None),
-        ("aider", "Aider", "aider", None),
+        ("claude", "Claude", "claude", Some("--dangerously-skip-permissions"), Some("--continue")),
+        ("codex", "Codex", "codex", Some("--dangerously-bypass-approvals-and-sandbox"), Some("resume --last")),
+        ("opencode", "OpenCode", "opencode", Some("--auto"), Some("--continue")),
+        ("antigravity", "Antigravity", "agy", Some("--dangerously-skip-permissions"), Some("--continue")),
+        ("gemini", "Gemini", "gemini", None, None),
+        ("goose", "Goose", "goose session", None, None),
+        ("aider", "Aider", "aider", None, None),
     ]
     .into_iter()
-    .map(|(id, name, command, bypass)| AgentCli {
+    .map(|(id, name, command, bypass, resume)| AgentCli {
         id: id.into(),
         name: name.into(),
         command: command.into(),
         enabled: true,
         bypass_args: bypass.map(String::from),
+        resume_args: resume.map(String::from),
     })
     .collect()
 }

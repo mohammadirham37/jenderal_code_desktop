@@ -23,6 +23,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("010_profile_task_tool", include_str!("../migrations/010_profile_task_tool.sql")),
     ("011_profile_skill_tool", include_str!("../migrations/011_profile_skill_tool.sql")),
     ("012_message_images", include_str!("../migrations/012_message_images.sql")),
+    ("013_agent_resume_args", include_str!("../migrations/013_agent_resume_args.sql")),
 ];
 
 pub struct Db {
@@ -1304,6 +1305,31 @@ mod tests {
         assert_eq!(bypass("opencode").as_deref(), Some("--auto"));
         assert_eq!(bypass("antigravity").as_deref(), Some("--dangerously-skip-permissions"));
         assert_eq!(bypass("gemini"), None);
+    }
+
+    #[test]
+    fn resume_args_are_added_to_saved_agent_lists_once() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        for a in &mut settings.agent_clis {
+            a.resume_args = None;
+        }
+        // A value the user chose is kept.
+        settings.agent_clis[2].resume_args = Some("-s main".into());
+        d.save_settings(&settings).unwrap();
+
+        let sql = include_str!("../migrations/013_agent_resume_args.sql");
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(sql)?)).unwrap();
+        }
+        let agents = d.get_settings().unwrap().agent_clis;
+        let resume = |id: &str| agents.iter().find(|a| a.id == id).unwrap().resume_args.clone();
+        assert_eq!(resume("claude").as_deref(), Some("--continue"));
+        assert_eq!(resume("codex").as_deref(), Some("resume --last"));
+        assert_eq!(resume("opencode").as_deref(), Some("-s main"));
+        assert_eq!(resume("antigravity").as_deref(), Some("--continue"));
+        assert_eq!(resume("gemini"), None);
+        assert_eq!(agents.len(), 7, "order and entries kept");
     }
 
     #[test]

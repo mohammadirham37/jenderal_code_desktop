@@ -31,7 +31,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useChat, type QueuedMessage, type SteeringMessage } from "@/stores/chat";
+import { lastSessionKey, useChat, type QueuedMessage, type SteeringMessage } from "@/stores/chat";
 import { useSkills } from "@/stores/skills";
 import { useApp } from "@/stores/app";
 import { useEditor } from "@/stores/editor";
@@ -108,6 +108,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
       statusDetail: s.statusDetail,
       lastError: s.lastError,
       hasStreaming: s.streaming !== null,
+      sessionsLoaded: s.sessionsLoaded,
     })),
   );
   const queued = useChat((s) => (s.activeSessionId ? s.queued[s.activeSessionId] : undefined)) ?? NONE_QUEUED;
@@ -153,15 +154,20 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
   }, [input, full]);
 
   // Ensure a session exists for this workspace.
+  // Waits for the session list, so a project reopened at startup does not
+  // get a fresh session; prefers the session last open in the project.
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace || !chat.sessionsLoaded) return;
     const st = useChat.getState();
     const active = st.sessions.find((s) => s.id === st.activeSessionId);
     if (active && active.workspace_id === workspace.id) return;
-    const existing = st.sessions.find((s) => s.workspace_id === workspace.id);
+    const last = localStorage.getItem(lastSessionKey(workspace.id));
+    const existing =
+      st.sessions.find((s) => s.id === last && s.workspace_id === workspace.id) ??
+      st.sessions.find((s) => s.workspace_id === workspace.id);
     if (existing) void st.selectSession(existing.id);
     else void st.newSession(workspace.id);
-  }, [workspace?.id, chat.activeSessionId, chat.sessions.length]);
+  }, [workspace?.id, chat.activeSessionId, chat.sessions.length, chat.sessionsLoaded]);
 
   useEffect(() => {
     if (!notice) return;

@@ -2,7 +2,9 @@
  *  belong to their project: switching projects parks them (their processes
  *  keep running and their output keeps arriving in the xterm registry) and
  *  switching back restores them. They end when closed, when their project
- *  is closed or removed, or when the app quits. */
+ *  is closed or removed, or when the app quits. The tab list is saved, so
+ *  after a restart each project's tabs come back the first time it is
+ *  shown, agent CLIs continuing their last conversation (`resume_args`). */
 import { create } from "zustand";
 import { api, events, type AgentCli } from "@/lib/ipc";
 import { onWorkspaceRemoved, useApp } from "./app";
@@ -51,12 +53,49 @@ const registry = () => import("@/features/terminal/xtermRegistry");
 
 const newTabId = () => `center-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-async function spawn(tab: CenterTab) {
+async function spawn(tab: CenterTab, command = tab.command) {
   (await registry()).ensureXterm(tab.id, useApp.getState().settings.terminal_font_size);
-  await api.terminalCreate(tab.id, 80, 24, tab.command);
+  await api.terminalCreate(tab.id, 80, 24, command);
 }
 
 let exitListening = false;
+
+/** Saved tabs: what reopens after a restart. */
+const STORAGE_KEY = "jcode:center-tabs";
+type SavedTab = Pick<CenterTab, "id" | "title" | "command" | "agentId" | "bypass">;
+type SavedProjects = Record<string, { tabs: SavedTab[]; activeId: string }>;
+
+function loadSaved(): SavedProjects {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Projects with saved tabs not shown yet in this run. */
+const unrestored: SavedProjects = loadSaved();
+
+const toSaved = (t: CenterTab): SavedTab => ({
+  id: t.id,
+  title: t.title,
+  command: t.command,
+  agentId: t.agentId,
+  bypass: t.bypass,
+});
+
+/** The command that continues a restored agent tab's last conversation:
+ *  `<command> <resume_args> <bypass flags>` from the current preset, or
+ *  the tab's own command when the agent has no resume arguments. */
+function resumeCommand(tab: CenterTab): string | undefined {
+  if (!tab.agentId) return tab.command;
+  const agent = useApp.getState().settings.agent_clis.find((a) => a.id === tab.agentId);
+  const resume = agent?.resume_args?.trim();
+  if (!agent || !resume) return tab.command;
+  const flags = tab.bypass ? agent.bypass_args?.trim() : "";
+  return [agent.command, resume, flags].filter(Boolean).join(" ");
+}
 
 export const useCenterTabs = create<CenterTabsState>((set, get) => {
   // Exit events also reach tabs of parked projects.
@@ -76,11 +115,33 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
     if (ids.length) void registry().then((r) => ids.forEach(r.disposeXterm));
   };
 
-  const open = async (tab: CenterTab) => {
+  const listenExit = () => {
     if (!exitListening) {
       exitListening = true;
       void events.terminalExit((e) => patch(e.terminal_id, { exited: true }));
     }
+  };
+
+  /** Start the processes of tabs restored from the saved list. */
+  const respawn = (tabs: CenterTab[]) => {
+    listenExit();
+    for (const tab of tabs) {
+      const command = resumeCommand(tab);
+      void registry()
+        .then((r) => {
+          r.ensureXterm(tab.id, useApp.getState().settings.terminal_font_size);
+          r.writeXterm(
+            tab.id,
+            `\x1b[90m[restored after restart${command !== tab.command ? ", continuing the last conversation" : ""}]\x1b[0m\r\n`,
+          );
+          return spawn(tab, command);
+        })
+        .catch((e) => patch(tab.id, { exited: true, error: String(e) }));
+    }
+  };
+
+  const open = async (tab: CenterTab) => {
+    listenExit();
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
     try {
       await spawn(tab);
@@ -149,16 +210,28 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
     },
 
     switchProject: (from, to) => {
+      // First visit since a restart: bring back the saved tabs.
+      const saved = to && !get().parked[to] ? unrestored[to] : undefined;
+      if (to) delete unrestored[to];
+      const restored: ParkedTabs | undefined = saved && {
+        tabs: saved.tabs.map((t) => ({ ...t, exited: false })),
+        activeId: saved.tabs.some((t) => t.id === saved.activeId) ? saved.activeId : CHAT_TAB,
+      };
       set((s) => {
         const parked = { ...s.parked };
         if (from && s.tabs.length) parked[from] = { tabs: s.tabs, activeId: s.activeId };
-        const next = (to && parked[to]) || { tabs: [], activeId: CHAT_TAB };
+        const next = restored ?? (to ? parked[to] : undefined) ?? { tabs: [], activeId: CHAT_TAB };
         if (to) delete parked[to];
         return { parked, tabs: next.tabs, activeId: next.activeId };
       });
+      if (restored?.tabs.length) respawn(restored.tabs);
     },
 
     killProject: (workspaceId) => {
+      if (unrestored[workspaceId]) {
+        delete unrestored[workspaceId];
+        persist();
+      }
       const ws = useApp.getState().workspace;
       const s = get();
       if (ws?.id === workspaceId) {
@@ -190,3 +263,18 @@ useApp.subscribe((s, prev) => {
 });
 
 onWorkspaceRemoved((id) => useCenterTabs.getState().killProject(id));
+
+/** Save every project's tabs (shown, parked, and not yet restored). */
+function persist() {
+  const s = useCenterTabs.getState();
+  const projects: SavedProjects = { ...unrestored };
+  for (const [ws, p] of Object.entries(s.parked)) projects[ws] = { tabs: p.tabs.map(toSaved), activeId: p.activeId };
+  const current = useApp.getState().workspace?.id;
+  if (current) projects[current] = { tabs: s.tabs.map(toSaved), activeId: s.activeId };
+  for (const [ws, p] of Object.entries(projects)) if (!p.tabs.length) delete projects[ws];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+}
+
+useCenterTabs.subscribe((s, prev) => {
+  if (s.tabs !== prev.tabs || s.activeId !== prev.activeId || s.parked !== prev.parked) persist();
+});

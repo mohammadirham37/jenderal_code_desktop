@@ -177,6 +177,8 @@ export interface AgentCli {
   enabled: boolean;
   /** Flags appended when opened "with bypass permissions". */
   bypass_args?: string | null;
+  /** Arguments that continue the last conversation (restored tabs). */
+  resume_args?: string | null;
 }
 
 export interface AppSettings {

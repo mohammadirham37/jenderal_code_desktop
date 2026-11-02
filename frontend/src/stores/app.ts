@@ -55,6 +55,9 @@ function applyTheme(theme: string) {
   document.documentElement.classList.toggle("dark", dark);
 }
 
+/** The open project, reopened on the next start. */
+const LAST_WORKSPACE_KEY = "jcode:last-workspace";
+
 const removedListeners = new Set<(workspaceId: string) => void>();
 /** Run `f` when a project is removed from the list (e.g. to stop its
  *  terminals, which can no longer be reached). */
@@ -93,12 +96,17 @@ export const useApp = create<AppState>((set, get) => ({
     // raced the IPC bridge).
     void get().setZoom(readStoredZoom());
     try {
-      const [settings, workspace, recent] = await Promise.all([
+      const [settings, active, recent] = await Promise.all([
         api.getSettings(),
         api.getActiveWorkspace(),
         api.listWorkspaces(),
       ]);
       applyTheme(settings.theme);
+      // After a restart, reopen the project that was open (if it still exists).
+      let workspace = active;
+      const last = localStorage.getItem(LAST_WORKSPACE_KEY);
+      const lastPath = !workspace && last ? recent.find((w) => w.id === last)?.root_path : undefined;
+      if (lastPath) workspace = await api.openWorkspace(lastPath).catch(() => null);
       set({
         settings,
         workspace,
@@ -121,6 +129,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   openWorkspacePath: async (path) => {
     const ws = await api.openWorkspace(path);
+    localStorage.setItem(LAST_WORKSPACE_KEY, ws.id);
     const recent = await api.listWorkspaces();
     set({ workspace: ws, recent, view: "workspace" });
   },
@@ -134,6 +143,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   closeWorkspace: async () => {
     await api.closeWorkspace();
+    localStorage.removeItem(LAST_WORKSPACE_KEY);
     set({ workspace: null, view: "welcome" });
   },
 
