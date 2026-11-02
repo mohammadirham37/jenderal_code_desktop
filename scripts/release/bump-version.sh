@@ -11,12 +11,13 @@ node -e '
   // The first `version = ` is [workspace.package] (crates inherit it).
   const cargo = fs.readFileSync("Cargo.toml", "utf8");
   fs.writeFileSync("Cargo.toml", cargo.replace(/^version = "[^"]+"/m, `version = "${process.argv[1]}"`));
-  for (const p of ["apps/desktop/tauri.conf.json", "frontend/package.json"]) {
+  for (const p of ["apps/desktop/tauri.conf.json", "frontend/package.json", "frontend/package-lock.json"]) {
     const j = JSON.parse(fs.readFileSync(p, "utf8"));
     j.version = process.argv[1];
+    // The lockfile repeats it for the root package; nothing else changes.
+    if (j.packages?.[""]) j.packages[""].version = process.argv[1];
     fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
   }' "$V"
-npm --prefix frontend install --package-lock-only --silent
 cargo update -w --offline >/dev/null 2>&1 || cargo update -w >/dev/null
 grep -n "^version" Cargo.toml | head -1
 grep -n '"version"' apps/desktop/tauri.conf.json frontend/package.json
