@@ -32,6 +32,7 @@ run() {
     -e TAURI_SIGNING_PRIVATE_KEY -e TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
     -u "$(id -u):$(id -g)" -e HOME=/tmp/home \
     -e CARGO_HOME=/cache/cargo -e XWIN_CACHE_DIR=/cache/xwin -e npm_config_cache=/cache/npm \
+    -e XDG_CACHE_HOME=/cache/xdg \
     -v "$PWD":/src \
     -v jenderalcode-cache:/cache \
     "$IMAGE" bash -c "mkdir -p /tmp/home && cd /src && $1"
@@ -43,7 +44,13 @@ docker run --rm -v jenderalcode-cache:/cache "$IMAGE" chown -R "$(id -u):$(id -g
 run "npm --prefix frontend ci"
 
 if [ "$TARGET" = linux ] || [ "$TARGET" = all ]; then
-  run "npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage --config '$UPDATER'"
+  # Under x86_64 emulation (Docker on Apple Silicon) AppImages fail with
+  # "Exec format error": the emulator rejects their magic bytes (AI\x02 at
+  # offset 8), and linuxdeploy's plugins are AppImages. Blank those bytes in
+  # Tauri's tool cache and bundle the AppImage again.
+  run "npx --yes @tauri-apps/cli@2 build --bundles deb,rpm,appimage --config '$UPDATER'" ||
+    run "for f in /cache/xdg/tauri/*.AppImage; do printf '\\0\\0\\0' | dd of=\"\$f\" bs=1 seek=8 conv=notrunc 2>/dev/null; done &&
+         npx --yes @tauri-apps/cli@2 build --bundles appimage --config '$UPDATER'"
   cp target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm \
      target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig "$OUT"/
 fi

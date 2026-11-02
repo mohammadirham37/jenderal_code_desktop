@@ -4,8 +4,9 @@
 #
 #   scripts/release/publish.sh <notes-file>
 #
-# Run after build-macos.sh (and build-linux-windows.sh, with its output
-# copied into the same folder). Publishing is an outward action: agents
+# Run after build-macos.sh. Pushing the tag starts the GitHub Actions
+# workflow that adds the Linux and Windows bundles to this release and
+# merges them into latest.json. Publishing is an outward action: agents
 # ask the maintainer first.
 set -euo pipefail
 NOTES=${1:?usage: publish.sh <notes-file>}

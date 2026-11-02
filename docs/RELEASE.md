@@ -11,11 +11,13 @@ Detail mesin build disimpan di catatan pribadi maintainer, bukan di repo.
 | OS | Bundle | Dibangun di |
 |----|--------|-------------|
 | macOS (Apple Silicon + Intel) | `.app`, `.dmg` (universal) | Mac |
-| Linux x86_64 | `.deb`, `.rpm`, `.AppImage` | Host Linux + Docker |
-| Windows x86_64 | installer NSIS `.exe` | Host Linux + Docker (cross-compile `cargo-xwin`) |
+| Linux x86_64 | `.deb`, `.rpm`, `.AppImage` | GitHub Actions (cadangan: Docker) |
+| Windows x86_64 | installer NSIS `.exe` | GitHub Actions (cadangan: Docker, cross-compile `cargo-xwin`) |
 
-Bundle macOS tidak bisa dibangun di Linux; bundle Linux dan Windows paling
-mudah dibangun di Docker (`scripts/release/`).
+Bundle macOS tidak bisa dibangun di Linux. Bundle Linux dan Windows dibangun
+otomatis oleh `.github/workflows/release.yml` di runner asli begitu tag
+`vX.Y.Z` di-push (oleh `publish.sh`); Docker (`scripts/release/`) hanya
+cadangan.
 
 ## 1. Persiapan versi
 
@@ -58,7 +60,22 @@ cocok dengan `pubkey` di `tauri.conf.json`.
   Windows installer NSIS `-setup.exe`. Masing-masing punya `.sig`, yang
   isinya masuk ke `latest.json` (file `.sig` sendiri tidak diunggah).
 
-## 2. Linux dan Windows (host Linux dengan Docker)
+## 2. Linux dan Windows
+
+### Otomatis: GitHub Actions
+
+Workflow `Release (Linux, Windows)` jalan saat tag `v*` di-push: membangun
+AppImage/deb/rpm (ubuntu-22.04) dan installer NSIS (windows-latest),
+menandatangani bundle update dengan secret repo `TAURI_SIGNING_PRIVATE_KEY`,
+menunggu rilis dari Mac ada, lalu mengunggah bundle dan menggabungkan
+entrinya ke `latest.json` rilis itu (`latest-json.mjs --merge`, tanda tangan
+diverifikasi). Untuk tag yang sudah ada: Actions → Release (Linux, Windows)
+→ Run workflow, isi tag; atau `gh workflow run release.yml -f tag=vX.Y.Z`.
+
+Secret `TAURI_SIGNING_PRIVATE_KEY` berisi kunci updater (isi file, bukan
+path). Mengganti kunci berarti memperbarui secret ini dan `pubkey`.
+
+### Cadangan: host Linux dengan Docker
 
 Salin source ke host build. Kalau host tidak punya akses ke repo, kirim
 lewat git bundle, sehingga yang terkirim hanya riwayat yang sudah di-commit
@@ -141,7 +158,8 @@ Windows juga belum ditandatangani (SmartScreen akan memperingatkan).
 1. Kumpulkan semua artefak (termasuk `.sig`) di `dist-release/X.Y.Z/`.
 2. Uji minimal: app terbuka, bisa membuka workspace, dan satu chat dengan
    provider mock/nyata berjalan, di tiap OS yang tersedia.
-3. Tulis catatan rilis (ditampilkan apa adanya di dialog update app), lalu:
+3. Tulis catatan rilis (ditampilkan apa adanya di dialog update app), lalu
+   (bundle Linux dan Windows menyusul dari GitHub Actions):
    ```bash
    scripts/release/publish.sh <catatan.md>
    ```

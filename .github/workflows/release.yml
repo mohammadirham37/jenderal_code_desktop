@@ -1,0 +1,138 @@
+# Linux and Windows release builds. The macOS build and the GitHub Release
+# itself come from a Mac (scripts/release/build-macos.sh + publish.sh, which
+# pushes the tag); this workflow then adds the Linux bundles and the Windows
+# installer to that release and merges their entries into latest.json, the
+# feed installed apps update from. See docs/RELEASE.md.
+#
+# Runs on a pushed v* tag, or by hand for an existing tag. Only the build
+# step sees the updater signing key (repository secret).
+name: Release (Linux, Windows)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, e.g. v0.1.1"
+        required: true
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            bundles: deb,rpm,appimage
+          - os: windows-latest
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the tag matches the app version
+        run: |
+          v=$(node -p 'require("./apps/desktop/tauri.conf.json").version')
+          [ "v$v" = "$TAG" ] || { echo "tag $TAG but app version $v"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev patchelf rpm file
+
+      # Built here instead of beforeBuildCommand, whose `sh -c '…'` does not
+      # survive cmd.exe on Windows.
+      - name: Frontend
+        run: npm --prefix frontend ci && npm --prefix frontend run build
+
+      - name: Build and sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: >
+          npx --yes @tauri-apps/cli@2 build --bundles ${{ matrix.bundles }}
+          --config '{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          B=target/release/bundle
+          if [ "$RUNNER_OS" = Linux ]; then
+            cp $B/deb/*.deb $B/rpm/*.rpm $B/appimage/*.AppImage $B/appimage/*.AppImage.sig out/
+          else
+            cp $B/nsis/*-setup.exe $B/nsis/*-setup.exe.sig out/
+          fi
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ runner.os }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The workflow's own commit: the release scripts and the pubkey.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundles-*
+          merge-multiple: true
+          path: dist
+
+      - name: Wait for the release (created from the Mac by publish.sh)
+        run: |
+          for i in $(seq 1 60); do
+            gh release view "$TAG" >/dev/null 2>&1 && exit 0
+            sleep 30
+          done
+          echo "release $TAG not found; publish it from the Mac first"; exit 1
+
+      - name: Merge latest.json and upload
+        run: |
+          V=${TAG#v}
+          mkdir -p "dist-release/$V" published
+          mv dist/* "dist-release/$V/"
+          if gh release download "$TAG" -p latest.json -D published; then
+            node scripts/release/latest-json.mjs "$V" --merge published/latest.json
+          else
+            node scripts/release/latest-json.mjs "$V"
+          fi
+          cat "dist-release/$V/latest.json"
+          # .sig files are not uploaded: latest.json carries the signatures.
+          gh release upload "$TAG" --clobber $(find "dist-release/$V" -type f ! -name '*.sig')

@@ -3,6 +3,10 @@
 // artifacts in dist-release/<version>/:
 //
 //   node scripts/release/latest-json.mjs <version> [notes-file]
+//   node scripts/release/latest-json.mjs <version> --merge <published latest.json>
+//
+// --merge (CI) keeps the platforms and notes of an already published feed
+// and adds the ones built here (Linux and Windows next to the Mac's macOS).
 //
 // Platforms are included when their update bundle and its .sig exist:
 //   macOS   JenderalCode_<v>_universal.app.tar.gz  -> darwin-aarch64, darwin-x86_64
@@ -14,7 +18,10 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO = process.env.JC_RELEASE_REPO ?? "mohammadirham37/jenderal_code_desktop";
-const [version, notesFile] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const mergeAt = args.indexOf("--merge");
+const mergeFile = mergeAt >= 0 ? args.splice(mergeAt, 2)[1] : null;
+const [version, notesFile] = args;
 if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
   console.error("usage: latest-json.mjs <version> [notes-file]");
   process.exit(1);
@@ -62,11 +69,16 @@ if (Object.keys(platforms).length === 0) {
   process.exit(1);
 }
 
+const published = mergeFile ? JSON.parse(readFileSync(mergeFile, "utf8")) : null;
+if (published && published.version !== version) {
+  console.error(`${mergeFile} is for ${published.version}, not ${version}`);
+  process.exit(1);
+}
 const feed = {
   version,
-  notes: notesFile ? readFileSync(notesFile, "utf8").trim() : "",
-  pub_date: new Date().toISOString(),
-  platforms,
+  notes: notesFile ? readFileSync(notesFile, "utf8").trim() : (published?.notes ?? ""),
+  pub_date: published?.pub_date ?? new Date().toISOString(),
+  platforms: { ...published?.platforms, ...platforms },
 };
 writeFileSync(join(dir, "latest.json"), JSON.stringify(feed, null, 2) + "\n");
-console.log(`${join(dir, "latest.json")}: ${Object.keys(platforms).join(", ")}`);
+console.log(`${join(dir, "latest.json")}: ${Object.keys(feed.platforms).join(", ")}`);
