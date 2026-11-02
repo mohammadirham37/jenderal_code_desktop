@@ -24,6 +24,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("011_profile_skill_tool", include_str!("../migrations/011_profile_skill_tool.sql")),
     ("012_message_images", include_str!("../migrations/012_message_images.sql")),
     ("013_agent_resume_args", include_str!("../migrations/013_agent_resume_args.sql")),
+    ("014_workspace_hidden", include_str!("../migrations/014_workspace_hidden.sql")),
 ];
 
 pub struct Db {
@@ -131,7 +132,7 @@ impl Db {
             let now = now_ms();
             conn.execute(
                 "INSERT INTO workspaces(id, name, root_path, last_opened_at) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(root_path) DO UPDATE SET name = ?2, last_opened_at = ?4",
+                 ON CONFLICT(root_path) DO UPDATE SET name = ?2, last_opened_at = ?4, hidden = 0",
                 params![new_id(), name, root_path, now],
             )?;
             let row = conn.query_row(
@@ -154,7 +155,7 @@ impl Db {
     pub fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, root_path, last_opened_at FROM workspaces
+                "SELECT id, name, root_path, last_opened_at FROM workspaces WHERE hidden = 0
                  ORDER BY last_opened_at DESC LIMIT 50",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -213,9 +214,11 @@ impl Db {
         })
     }
 
-    pub fn delete_workspace(&self, id: &str) -> Result<()> {
+    /// Take a project off the recent list. Its chat sessions stay (deleting
+    /// the row would cascade to them); opening the folder again shows it.
+    pub fn hide_workspace(&self, id: &str) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute("DELETE FROM workspaces WHERE id = ?1", params![id])?;
+            conn.execute("UPDATE workspaces SET hidden = 1 WHERE id = ?1", params![id])?;
             Ok(())
         })
     }
@@ -1237,6 +1240,20 @@ mod tests {
         // `_` and `%` must be literal, not wildcards.
         assert!(d.search_sessions("done_o_").unwrap().is_empty());
         assert!(d.search_sessions("1%done").unwrap().is_empty());
+    }
+
+    #[test]
+    fn hiding_a_workspace_keeps_its_sessions() {
+        let d = db();
+        let w = d.upsert_workspace("/tmp/p-hide", "p").unwrap();
+        let s = d.create_session(&w.id, "keep me", None, None, None).unwrap();
+        d.hide_workspace(&w.id).unwrap();
+        assert!(d.list_workspaces().unwrap().iter().all(|x| x.id != w.id), "off the list");
+        assert!(d.get_session(&s.id).unwrap().is_some(), "history kept");
+        // Opening the folder again brings it back with the same id.
+        let again = d.upsert_workspace("/tmp/p-hide", "p").unwrap();
+        assert_eq!(again.id, w.id);
+        assert!(d.list_workspaces().unwrap().iter().any(|x| x.id == w.id));
     }
 
     #[test]

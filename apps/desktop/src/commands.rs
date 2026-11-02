@@ -134,8 +134,9 @@ pub fn close_workspace(state: State<'_, AppState>) -> CmdResult<()> {
 }
 
 #[tauri::command]
-pub fn remove_workspace(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.db.delete_workspace(&id).map_err(err)
+pub async fn remove_workspace(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let db = state.db.clone();
+    blocking(move || db.hide_workspace(&id).map_err(err)).await
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
  *  modal), and recently opened projects for quick switching. */
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { FolderGit2, FolderOpen, FolderPlus, History, MessageSquare, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { FolderGit2, FolderOpen, FolderPlus, History, MessageSquare, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useApp } from "@/stores/app";
 import { useChat } from "@/stores/chat";
 import { IconButton, Modal } from "@/components/ui";
@@ -47,6 +47,23 @@ function ProjectList() {
   // Terminal / agent-CLI tabs still running in the other projects.
   const parked = useCenterTabs((s) => s.parked);
   const running = (id: string) => parked[id]?.tabs.filter((t) => !t.exited) ?? [];
+  const [menu, setMenu] = useState<{ w: WorkspaceInfo; x: number; y: number } | null>(null);
+
+  /** Take a project off the list (its chat history stays; opening the
+   *  folder again brings it back). The open project is closed first. */
+  const remove = async (w: WorkspaceInfo) => {
+    setMenu(null);
+    const isOpen = w.id === workspace?.id;
+    const live = isOpen ? useCenterTabs.getState().tabs.filter((t) => !t.exited) : running(w.id);
+    const parts = [
+      isOpen ? `Close ${w.name} and remove it from the list?` : `Remove ${w.name} from the list?`,
+      live.length ? `Still running: ${live.map((t) => t.title).join(", ")}. They will be stopped.` : "",
+      "Its files and chat history are kept; open the folder again to bring it back.",
+    ];
+    if ((isOpen || live.length) && !(await confirmAction(parts.filter(Boolean).join("\n\n")))) return;
+    if (isOpen) await useApp.getState().closeWorkspace();
+    await useApp.getState().removeRecent(w.id);
+  };
   const projects = useMemo(() => [...recent].sort((a, b) => b.last_opened_at - a.last_opened_at), [recent]);
 
   const open = async (w: WorkspaceInfo) => {
@@ -76,6 +93,10 @@ function ProjectList() {
             <div
               key={w.id}
               onClick={() => void open(w)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ w, x: e.clientX, y: e.clientY });
+              }}
               title={w.root_path}
               className={`group relative mb-px cursor-pointer rounded-[4px] px-2.5 py-2 transition-colors ${
                 active
@@ -95,26 +116,20 @@ function ProjectList() {
                     {running(w.id).length}
                   </span>
                 )}
-                {!active && (
-                  <button
-                    title="Remove from list"
-                    className="hidden shrink-0 rounded p-0.5 text-neutral-500 hover:bg-neutral-300/60 group-hover:block dark:hover:bg-neutral-700"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      const live = running(w.id);
-                      if (
-                        live.length &&
-                        !(await confirmAction(
-                          `${w.name} still has ${live.map((t) => t.title).join(", ")} running. Removing it from the list stops them.`,
-                        ))
-                      )
-                        return;
-                      void useApp.getState().removeRecent(w.id);
-                    }}
-                  >
-                    <X size={11} />
-                  </button>
-                )}
+                <button
+                  title="Project actions"
+                  aria-label={`Actions for ${w.name}`}
+                  className={`shrink-0 rounded p-0.5 text-neutral-500 hover:bg-neutral-300/60 dark:hover:bg-neutral-700 ${
+                    menu?.w.id === w.id ? "block" : "hidden group-hover:block"
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setMenu(menu?.w.id === w.id ? null : { w, x: r.right - 176, y: r.bottom + 4 });
+                  }}
+                >
+                  <MoreHorizontal size={12} />
+                </button>
               </div>
               <div className="mt-0.5 truncate pl-[18px] font-mono text-[10px] text-neutral-500">{shortPath(w.root_path)}</div>
               {active && <span className="absolute inset-y-2 left-0 w-[2px] bg-accent-500" />}
@@ -122,6 +137,22 @@ function ProjectList() {
           );
         })}
       </div>
+      {menu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div
+            className="animate-rise fixed z-50 w-44 overflow-hidden rounded-[6px] border border-neutral-200 bg-white py-1 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+            style={{ left: Math.max(8, menu.x), top: Math.min(menu.y, window.innerHeight - 60) }}
+          >
+            <button
+              onClick={() => void remove(menu.w)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
+            >
+              <Trash2 size={12} /> Remove from list
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
