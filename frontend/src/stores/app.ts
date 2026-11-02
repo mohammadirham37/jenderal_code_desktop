@@ -55,6 +55,13 @@ function applyTheme(theme: string) {
   document.documentElement.classList.toggle("dark", dark);
 }
 
+const removedListeners = new Set<(workspaceId: string) => void>();
+/** Run `f` when a project is removed from the list (e.g. to stop its
+ *  terminals, which can no longer be reached). */
+export function onWorkspaceRemoved(f: (workspaceId: string) => void) {
+  removedListeners.add(f);
+}
+
 export const useApp = create<AppState>((set, get) => ({
   view: "welcome",
   workspace: null,
@@ -132,6 +139,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   removeRecent: async (id) => {
     await api.removeWorkspace(id);
+    for (const f of removedListeners) f(id);
     set({ recent: await api.listWorkspaces() });
   },
 

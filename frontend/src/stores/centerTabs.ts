@@ -1,9 +1,11 @@
 /** Terminal and agent-CLI tabs in the Chat layout's centre column. Tabs
- *  belong to the open workspace: they survive page and layout switches and
- *  are killed when the workspace changes or closes. */
+ *  belong to their project: switching projects parks them (their processes
+ *  keep running and their output keeps arriving in the xterm registry) and
+ *  switching back restores them. They end when closed, when their project
+ *  is closed or removed, or when the app quits. */
 import { create } from "zustand";
 import { api, events, type AgentCli } from "@/lib/ipc";
-import { useApp } from "./app";
+import { onWorkspaceRemoved, useApp } from "./app";
 
 export const CHAT_TAB = "chat";
 
@@ -19,9 +21,17 @@ export interface CenterTab {
   error?: string;
 }
 
-interface CenterTabsState {
+interface ParkedTabs {
   tabs: CenterTab[];
   activeId: string;
+}
+
+interface CenterTabsState {
+  /** Tabs of the open project. */
+  tabs: CenterTab[];
+  activeId: string;
+  /** Tabs of the other projects, by workspace id. */
+  parked: Record<string, ParkedTabs>;
   /** Installed state by agent id; `null` until detected. */
   installed: Record<string, boolean> | null;
   setActive: (id: string) => void;
@@ -30,7 +40,10 @@ interface CenterTabsState {
   restart: (id: string) => Promise<void>;
   close: (id: string) => Promise<void>;
   detectInstalled: () => Promise<void>;
-  reset: () => void;
+  /** Park the open project's tabs and show `workspaceId`'s. */
+  switchProject: (from: string | null, to: string | null) => void;
+  /** Kill a project's tabs (open or parked). */
+  killProject: (workspaceId: string) => void;
 }
 
 // xterm.js stays out of the initial bundle until a tab is opened.
@@ -46,8 +59,22 @@ async function spawn(tab: CenterTab) {
 let exitListening = false;
 
 export const useCenterTabs = create<CenterTabsState>((set, get) => {
+  // Exit events also reach tabs of parked projects.
   const patch = (id: string, p: Partial<CenterTab>) =>
-    set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...p } : t)) }));
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...p } : t)),
+      parked: Object.fromEntries(
+        Object.entries(s.parked).map(([ws, v]) => [
+          ws,
+          { ...v, tabs: v.tabs.map((t) => (t.id === id ? { ...t, ...p } : t)) },
+        ]),
+      ),
+    }));
+
+  const kill = (ids: string[]) => {
+    for (const id of ids) void api.terminalKill(id).catch(() => {});
+    if (ids.length) void registry().then((r) => ids.forEach(r.disposeXterm));
+  };
 
   const open = async (tab: CenterTab) => {
     if (!exitListening) {
@@ -65,6 +92,7 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
   return {
     tabs: [],
     activeId: CHAT_TAB,
+    parked: {},
     installed: null,
 
     setActive: (activeId) => set({ activeId }),
@@ -120,17 +148,45 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
       set({ installed: Object.fromEntries(agents.map((a, i) => [a.id, found[i] ?? false])) });
     },
 
-    reset: () => {
-      const ids = get().tabs.map((t) => t.id);
-      set({ tabs: [], activeId: CHAT_TAB, installed: null });
-      for (const id of ids) void api.terminalKill(id).catch(() => {});
-      if (ids.length) void registry().then((r) => ids.forEach(r.disposeXterm));
+    switchProject: (from, to) => {
+      set((s) => {
+        const parked = { ...s.parked };
+        if (from && s.tabs.length) parked[from] = { tabs: s.tabs, activeId: s.activeId };
+        const next = (to && parked[to]) || { tabs: [], activeId: CHAT_TAB };
+        if (to) delete parked[to];
+        return { parked, tabs: next.tabs, activeId: next.activeId };
+      });
+    },
+
+    killProject: (workspaceId) => {
+      const ws = useApp.getState().workspace;
+      const s = get();
+      if (ws?.id === workspaceId) {
+        kill(s.tabs.map((t) => t.id));
+        set({ tabs: [], activeId: CHAT_TAB });
+      }
+      const parked = s.parked[workspaceId];
+      if (parked) {
+        kill(parked.tabs.map((t) => t.id));
+        const rest = { ...s.parked };
+        delete rest[workspaceId];
+        set({ parked: rest });
+      }
     },
   };
 });
 
-// Tabs belong to the workspace; the detection cache follows the agent list.
+// Tabs follow their project: switching parks them, closing the project
+// (workspace → none) kills them. The detection cache follows the agent list.
 useApp.subscribe((s, prev) => {
-  if (s.workspace?.id !== prev.workspace?.id) useCenterTabs.getState().reset();
-  else if (s.settings.agent_clis !== prev.settings.agent_clis) useCenterTabs.setState({ installed: null });
+  const from = prev.workspace?.id ?? null;
+  const to = s.workspace?.id ?? null;
+  if (from !== to) {
+    if (from && !to) useCenterTabs.getState().killProject(from);
+    else useCenterTabs.getState().switchProject(from, to);
+  } else if (s.settings.agent_clis !== prev.settings.agent_clis) {
+    useCenterTabs.setState({ installed: null });
+  }
 });
+
+onWorkspaceRemoved((id) => useCenterTabs.getState().killProject(id));

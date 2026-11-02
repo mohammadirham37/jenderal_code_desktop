@@ -9,6 +9,7 @@ import { IconButton, Modal } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 import type { WorkspaceInfo } from "@/lib/ipc";
 import { confirmAction } from "@/lib/confirm";
+import { useCenterTabs } from "@/stores/centerTabs";
 
 export function ChatSidebar() {
   const workspace = useApp((s) => s.workspace);
@@ -43,6 +44,9 @@ export function ChatSidebar() {
 function ProjectList() {
   const { workspace, recent } = useApp(useShallow((s) => ({ workspace: s.workspace, recent: s.recent })));
   const [switching, setSwitching] = useState<string | null>(null);
+  // Terminal / agent-CLI tabs still running in the other projects.
+  const parked = useCenterTabs((s) => s.parked);
+  const running = (id: string) => parked[id]?.tabs.filter((t) => !t.exited) ?? [];
   const projects = useMemo(() => [...recent].sort((a, b) => b.last_opened_at - a.last_opened_at), [recent]);
 
   const open = async (w: WorkspaceInfo) => {
@@ -82,12 +86,29 @@ function ProjectList() {
               <div className="flex items-center gap-1.5">
                 <Icon size={12} className={`shrink-0 ${active ? "text-accent-600 dark:text-accent-400" : "text-neutral-400"}`} />
                 <span className={`min-w-0 flex-1 truncate text-xs ${active ? "font-medium" : ""}`}>{w.name}</span>
+                {!active && running(w.id).length > 0 && (
+                  <span
+                    title={`Still running: ${running(w.id).map((t) => t.title).join(", ")}`}
+                    className="flex shrink-0 items-center gap-1 rounded-[3px] bg-accent-500/10 px-1 font-mono text-[10px] text-accent-700 group-hover:hidden dark:text-accent-300"
+                  >
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-500" />
+                    {running(w.id).length}
+                  </span>
+                )}
                 {!active && (
                   <button
                     title="Remove from list"
                     className="hidden shrink-0 rounded p-0.5 text-neutral-500 hover:bg-neutral-300/60 group-hover:block dark:hover:bg-neutral-700"
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
+                      const live = running(w.id);
+                      if (
+                        live.length &&
+                        !(await confirmAction(
+                          `${w.name} still has ${live.map((t) => t.title).join(", ")} running. Removing it from the list stops them.`,
+                        ))
+                      )
+                        return;
                       void useApp.getState().removeRecent(w.id);
                     }}
                   >
