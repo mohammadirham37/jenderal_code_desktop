@@ -49,7 +49,7 @@ export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trail
           <ChatPanel variant="full" />
         </div>
         {tabs.length > 0 && (
-          <div className={`absolute inset-0 bg-neutral-950 text-neutral-200 ${showChat ? "hidden" : "block"}`}>
+          <div className={`absolute inset-0 bg-neutral-50 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200 ${showChat ? "hidden" : "block"}`}>
             <PanelSuspense>
               {tabs.map((t) => (
                 <TerminalTabBody key={t.id} tab={t} active={!showChat && t.id === activeId} />
@@ -71,8 +71,8 @@ function TerminalTabBody({ tab, active }: { tab: CenterTab; active: boolean }) {
   return (
     <div className={`absolute inset-0 flex-col ${active ? "flex" : "hidden"}`}>
       {tab.exited && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 px-3 py-1 font-mono text-[11px] text-neutral-400">
-          <span className={`min-w-0 flex-1 truncate ${tab.error ? "text-red-400" : ""}`}>
+        <div className="flex shrink-0 items-center gap-2 border-b border-neutral-200 px-3 py-1 font-mono text-[11px] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+          <span className={`min-w-0 flex-1 truncate ${tab.error ? "text-red-600 dark:text-red-400" : ""}`}>
             {tab.error ?? "Process exited"}
           </span>
           <Button size="sm" variant="ghost" onClick={() => void useCenterTabs.getState().restart(tab.id)}>

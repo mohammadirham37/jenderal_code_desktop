@@ -73,7 +73,7 @@ export function TerminalPanel() {
             className={`flex cursor-pointer items-center gap-1 px-3 text-[11px] ${
               activeId === t.id
                 ? "border-b-2 border-b-accent-500 font-medium"
-                : "text-neutral-500 hover:text-neutral-300"
+                : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-300"
             }`}
           >
             {t.title}

@@ -16,7 +16,8 @@ interface Entry {
 const entries = new Map<string, Entry>();
 let listening = false;
 
-const THEME = {
+/** Dark palette: CLI colors are shown as the CLI sends them. */
+const DARK = {
   background: "#0c0f0e",
   foreground: "#d6ddda",
   cursor: "#2fc3a5",
@@ -29,6 +30,54 @@ const THEME = {
   cyan: "#56b6c2",
   brightCyan: "#7fd3dc",
 };
+
+/** Light palette (app neutrals/accent). "white" is dark grey: CLIs print
+ *  plain text in white, which would vanish on a light background. */
+const LIGHT = {
+  background: "#f5f7f6",
+  foreground: "#1c2220",
+  cursor: "#0b8672",
+  cursorAccent: "#f5f7f6",
+  selectionBackground: "#13a68b40",
+  black: "#1c2220",
+  red: "#c2412d",
+  green: "#0b8672",
+  yellow: "#9a6700",
+  blue: "#2a62b8",
+  magenta: "#8e44ad",
+  cyan: "#0e7490",
+  white: "#67746f",
+  brightBlack: "#4e5954",
+  brightRed: "#d4513d",
+  brightGreen: "#0d6b5c",
+  brightYellow: "#7c5800",
+  brightBlue: "#1d4f99",
+  brightMagenta: "#7a3b96",
+  brightCyan: "#0b5f75",
+  brightWhite: "#252d2a",
+};
+
+const isDark = () => document.documentElement.classList.contains("dark");
+
+/** Theme options for the current app theme. In light mode xterm raises the
+ *  contrast of colors a CLI picked for dark terminals (e.g. truecolor greys). */
+function themeOptions() {
+  return isDark() ? { theme: DARK, minimumContrastRatio: 1 } : { theme: LIGHT, minimumContrastRatio: 4.5 };
+}
+
+// Follow the app theme (the `dark` class on <html>): every terminal, including
+// ones parked with another project, switches at once.
+let lastDark = isDark();
+new MutationObserver(() => {
+  const dark = isDark();
+  if (dark === lastDark) return;
+  lastDark = dark;
+  const opts = themeOptions();
+  for (const { term } of entries.values()) {
+    term.options.theme = opts.theme;
+    term.options.minimumContrastRatio = opts.minimumContrastRatio;
+  }
+}).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 
 /** The app's mono stack as a literal string: xterm measures with canvas,
  *  where `var(--font-mono)` is invalid. */
@@ -70,7 +119,7 @@ export function ensureXterm(id: string, fontSize: number): Entry {
       fontWeightBold: "600",
       lineHeight: 1.2,
       cursorBlink: true,
-      theme: THEME,
+      ...themeOptions(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

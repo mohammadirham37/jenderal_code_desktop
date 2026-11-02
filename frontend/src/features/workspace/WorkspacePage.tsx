@@ -125,7 +125,7 @@ function CodeLayout() {
               <PanelBottomClose size={13} />
             </IconButton>
           </div>
-          <div className="relative min-h-0 flex-1 bg-neutral-950 text-neutral-200">
+          <div className="relative min-h-0 flex-1 bg-neutral-50 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200">
             {[...visited].map((t) => (
               <div key={t} className={`absolute inset-0 ${t === bottomTab ? "block" : "hidden"}`}>
                 <PanelSuspense>

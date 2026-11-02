@@ -131,7 +131,7 @@ export function ChatLayout() {
         </div>
         <div className="relative min-h-0 flex-1">
           {[...visited].map((t) => (
-            <div key={t} className={`absolute inset-0 ${t === tab ? "block" : "hidden"} ${darkPanel(t)}`}>
+            <div key={t} className={`absolute inset-0 ${t === tab ? "block" : "hidden"}`}>
               <PanelSuspense>
                 {t === "changes" && <ChangesPanel onOpen={() => showTab("editor")} />}
                 {t === "files" && <FileExplorer />}
@@ -148,6 +148,4 @@ export function ChatLayout() {
   );
 }
 
-function darkPanel(t: ContextTab) {
-  return t === "terminal" || t === "git" ? "bg-neutral-950 text-neutral-200" : "";
-}
+
