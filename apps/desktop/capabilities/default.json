@@ -4,7 +4,9 @@
   "description": "Capabilities for the main app webview only (browser previews get none)",
   "permissions": [
     "core:default",
-    "dialog:default"
+    "dialog:default",
+    "updater:default",
+    "process:allow-restart"
   ],
   "webviews": [
     "main"

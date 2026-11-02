@@ -40,5 +40,16 @@
       "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzN0EyNUVBRjIzQkFEQkUKUldTK3JUdnk2aVY2MCt2aUM2TEt2RzBZSUJxVHJJK1I1VEU4Y2JOejVtdHczbmxHZWkra2hXaWwK",
+      "endpoints": [
+        "https://github.com/mohammadirham37/jenderal_code_desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

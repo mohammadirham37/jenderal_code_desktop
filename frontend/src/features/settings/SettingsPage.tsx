@@ -12,7 +12,7 @@ import {
   Palette,
   ShieldCheck,
   BookOpen,
-  Trash2, Plug } from "lucide-react";
+  Trash2, Plug, ArrowUpCircle } from "lucide-react";
 import { api, type UsageSummary } from "@/lib/ipc";
 import { useApp } from "@/stores/app";
 import { Button, Field, inputClass } from "@/components/ui";
@@ -20,6 +20,7 @@ import { formatCost, formatTokens } from "@/lib/format";
 import { AgentCliSettings } from "./AgentCliSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { McpSettings } from "./McpSettings";
+import { UpdateSettings } from "./UpdateSettings";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { confirmAction } from "@/lib/confirm";
 
@@ -86,6 +87,14 @@ export function SettingsPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <div className="mx-auto max-w-3xl space-y-8">
+          {/* Updates */}
+          <section id="updates">
+            <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              <ArrowUpCircle size={13} /> Updates
+            </h2>
+            <UpdateSettings />
+          </section>
+
           {/* Usage */}
           <section>
             <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">

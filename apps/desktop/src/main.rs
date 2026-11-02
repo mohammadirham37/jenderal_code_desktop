@@ -86,6 +86,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(navigation_guard())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .menu(quit::app_menu)
         .on_menu_event(|app, event| {
             if event.id() == quit::QUIT_MENU_ID {
@@ -271,15 +273,22 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("building JenderalCode Desktop")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // ⌘Q / the app menu's Quit (code `None`); `exit(0)` after the
-            // user confirmed passes through.
-            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = event {
-                if !quit::confirmed() {
-                    api.prevent_exit();
-                    quit::ask(app);
+            // user confirmed, and the restart after an update, pass through.
+            tauri::RunEvent::ExitRequested { api, code: None, .. } if !quit::confirmed() => {
+                api.prevent_exit();
+                quit::ask(app);
+            }
+            // A restart (after an update) may skip the window's `Destroyed`:
+            // stop terminals and servers here too so no process outlives us.
+            tauri::RunEvent::Exit => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.terminals.kill_all();
+                    state.runtime.shutdown();
                 }
             }
+            _ => {}
         });
 }
 

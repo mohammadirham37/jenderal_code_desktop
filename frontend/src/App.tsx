@@ -1,6 +1,7 @@
 /** App shell: sidebar navigation + routed views + command palette. */
 import { lazy, Suspense, useEffect } from "react";
 import {
+  ArrowUpCircle,
   Boxes,
   Plug,
   Bot,
@@ -19,6 +20,8 @@ import { Welcome } from "@/features/welcome/Welcome";
 import { WorkspacePage } from "@/features/workspace/WorkspacePage";
 import { Spinner } from "@/components/ui";
 import { Logo } from "@/components/Logo";
+import { UpdateDialog } from "@/components/UpdateDialog";
+import { startUpdateChecks, useUpdater } from "@/stores/updater";
 
 // Secondary views load on demand to keep the startup bundle small.
 const named = <K extends string>(p: Promise<Record<K, React.ComponentType>>, k: K) =>
@@ -58,12 +61,15 @@ function AppShell() {
   const zoom = useApp((s) => s.zoom);
   const chatInit = useChat((s) => s.init);
   const loadProviders = useProviders((s) => s.load);
+  const newVersion = useUpdater((s) => (s.update && s.status !== "current" ? s.update.version : null));
 
   useEffect(() => {
     void init();
     void chatInit();
     void loadProviders();
   }, [init, chatInit, loadProviders]);
+
+  useEffect(() => startUpdateChecks(), []);
 
   // Global save shortcut.
   useEffect(() => {
@@ -144,6 +150,17 @@ function AppShell() {
           })}
         </div>
         <div className="flex flex-col items-center gap-1.5">
+          {newVersion && (
+            <button
+              title={`Update to v${newVersion}`}
+              aria-label={`Update to v${newVersion}`}
+              onClick={() => useUpdater.getState().setDialogOpen(true)}
+              className="relative flex h-8 w-8 items-center justify-center rounded-[5px] text-accent-600 hover:bg-accent-500/10 dark:text-accent-400"
+            >
+              <ArrowUpCircle size={17} />
+              <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-accent-500" />
+            </button>
+          )}
           {/* Zoom indicator — visible whenever the zoom is not 100%. Click to reset. */}
           {zoom !== 1 && (
             <button
@@ -185,6 +202,7 @@ function AppShell() {
       </main>
 
       <CommandPalette />
+      <UpdateDialog />
 
     </div>
   );

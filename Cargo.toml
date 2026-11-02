@@ -64,6 +64,8 @@ glob = "0.3"
 log = "0.4"
 tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 tauri-build = { version = "2", features = [] }
 
 [profile.release]

@@ -24,11 +24,39 @@ mudah dibangun di Docker (`scripts/release/`).
    cargo test --workspace
    npm --prefix frontend run build
    ```
-2. Naikkan versi di tiga tempat sekaligus (harus sama):
-   - `Cargo.toml` → `[workspace.package] version`
-   - `apps/desktop/tauri.conf.json` → `version`
-   - `frontend/package.json` → `version` (lalu `npm --prefix frontend install` agar lockfile ikut)
-3. Commit (`Release vX.Y.Z`) dan buat tag `vX.Y.Z`.
+2. Naikkan versi (wajib untuk setiap rilis: updater hanya menawarkan versi
+   yang lebih tinggi dari yang terpasang):
+   ```bash
+   scripts/release/bump-version.sh X.Y.Z
+   ```
+   Skrip ini mengubah `Cargo.toml` (`[workspace.package] version`),
+   `apps/desktop/tauri.conf.json`, `frontend/package.json` dan kedua lockfile.
+3. Commit (`Release vX.Y.Z`). Tag `vX.Y.Z` dibuat oleh `publish.sh`.
+
+## Update otomatis (OTA)
+
+App memeriksa `https://github.com/<owner>/<repo>/releases/latest/download/latest.json`
+(lihat `plugins.updater` di `tauri.conf.json`) saat dibuka lalu tiap 6 jam,
+dan menampilkan tombol update di sidebar serta di Settings → Updates.
+Bundle update ditandatangani (minisign); app hanya memasang bundle yang
+cocok dengan `pubkey` di `tauri.conf.json`.
+
+- **Kunci privat** disimpan maintainer di luar repo (default
+  `~/.tauri/jenderalcode-updater.key`) dan dicadangkan di password manager.
+  Kalau hilang, app yang sudah terpasang tidak bisa menerima update lagi
+  (pengguna harus memasang ulang versi dengan kunci baru). Kalau bocor,
+  orang lain bisa membuat update palsu: buat kunci baru dan ganti `pubkey`.
+- Build biasa (`tauri build`) tidak butuh kunci. Hanya skrip rilis yang
+  mengaktifkan `createUpdaterArtifacts` (lewat `--config`) dan membutuhkan
+  `TAURI_SIGNING_PRIVATE_KEY` (isi kunci atau path ke file di Mac;
+  **isi kunci** untuk build Docker) serta
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (kosong bila kunci tanpa password).
+  Berikan lewat environment sesi itu saja; jangan tulis ke file di repo
+  atau ke shell history di host bersama.
+- Bundle update per OS: macOS `JenderalCode_X.Y.Z_universal.app.tar.gz`,
+  Linux `.AppImage` (paket `.deb`/`.rpm` tidak di-update otomatis),
+  Windows installer NSIS `-setup.exe`. Masing-masing punya `.sig`, yang
+  isinya masuk ke `latest.json` (file `.sig` sendiri tidak diunggah).
 
 ## 2. Linux dan Windows (host Linux dengan Docker)
 
@@ -44,12 +72,17 @@ ssh <user>@<build-host> 'git clone -b main /tmp/jc.bundle <folder-build> && rm /
 
 Untuk rilis berikutnya cukup `git pull /tmp/jc.bundle main` di folder yang sama.
 
-Lalu jalankan di host:
+Lalu jalankan di host, dengan kunci updater di environment:
 
 ```bash
 cd <folder-build>
+read -rs TAURI_SIGNING_PRIVATE_KEY && export TAURI_SIGNING_PRIVATE_KEY   # tempel isi kunci
 scripts/release/build-linux-windows.sh all   # atau: linux | windows
+unset TAURI_SIGNING_PRIVATE_KEY
 ```
+
+Salin hasil `dist-release/<versi>/` (termasuk file `.sig`) ke folder yang
+sama di Mac sebelum publikasi.
 
 - Image `jenderalcode-release-builder` (Ubuntu 22.04, Rust stable, Node 22,
   webkit2gtk, clang/lld, NSIS, cargo-xwin) dibangun otomatis.
@@ -64,10 +97,16 @@ scripts/release/build-linux-windows.sh all   # atau: linux | windows
 
 ```bash
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
-npx --yes @tauri-apps/cli@2 build --target universal-apple-darwin --bundles app,dmg
+scripts/release/build-macos.sh
 ```
 
-Hasil ada di `target/universal-apple-darwin/release/bundle/{macos,dmg}/`.
+Skrip ini membangun `.app` dan `.dmg` universal plus bundle update
+(`.app.tar.gz` + `.sig`), memverifikasi DMG, dan menyalinnya ke
+`dist-release/<versi>/`. Kuncinya diambil dari `TAURI_SIGNING_PRIVATE_KEY`
+atau file `~/.tauri/jenderalcode-updater.key` (`JC_UPDATER_KEY` untuk lokasi
+lain). Build tanpa updater (misalnya untuk dicoba sendiri) tetap bisa dengan
+`npx --yes @tauri-apps/cli@2 build --target universal-apple-darwin --bundles app,dmg`;
+hasilnya ada di `target/universal-apple-darwin/release/bundle/{macos,dmg}/`.
 Kalau pembuatan DMG gagal karena AppleEvent Finder timeout (-1712), `.app`
 sudah jadi. Lepas dulu image sementara yang masih ter-mount (`hdiutil info`,
 lalu `hdiutil detach <disk>`) dan hapus `bundle/macos/rw.*.dmg`, kemudian buat
@@ -99,22 +138,29 @@ Windows juga belum ditandatangani (SmartScreen akan memperingatkan).
 
 ## 4. Publikasi
 
-1. Kumpulkan semua artefak ke satu folder dan buat ulang `SHA256SUMS`.
+1. Kumpulkan semua artefak (termasuk `.sig`) di `dist-release/X.Y.Z/`.
 2. Uji minimal: app terbuka, bisa membuka workspace, dan satu chat dengan
    provider mock/nyata berjalan, di tiap OS yang tersedia.
-3. Push tag dan buat GitHub Release:
+3. Tulis catatan rilis (ditampilkan apa adanya di dialog update app), lalu:
    ```bash
-   git push origin vX.Y.Z
-   gh release create vX.Y.Z dist-release/X.Y.Z/* --title "vX.Y.Z" --notes-file <catatan>
+   scripts/release/publish.sh <catatan.md>
    ```
+   Skrip ini membuat `latest.json` (`scripts/release/latest-json.mjs`),
+   membuat dan mem-push tag `vX.Y.Z`, lalu `gh release create` dengan semua
+   artefak dan `latest.json`. Rilis harus berstatus *latest* (bukan draft
+   atau prerelease), karena app membaca `releases/latest`.
    Push dan publikasi rilis adalah aksi keluar: agen harus minta persetujuan
    maintainer dulu.
+4. Cek: `curl -sL https://github.com/<owner>/<repo>/releases/latest/download/latest.json`
+   menampilkan versi baru. App yang terpasang menawarkan update paling lambat
+   6 jam kemudian (atau lewat Settings → Updates → Check for updates).
 
 ## Aturan untuk agen
 
 - Jangan menulis host, user, IP, path home/remote, atau kredensial ke file
   repo, pesan commit, catatan rilis, maupun log yang di-commit.
-- Jangan commit artefak build (`target/`, `dist-release/`).
+- Jangan commit artefak build (`target/`, `dist-release/`) atau kunci updater
+  (`*.key`); hanya `pubkey` di `tauri.conf.json` yang boleh masuk repo.
 - Sebelum commit, cek: `git diff --cached | grep -nE '[0-9]{1,3}(\.[0-9]{1,3}){3}|/home/|/Users/|BEGIN .*PRIVATE KEY|ssh-(ed25519|rsa)'`
   harus kosong.
 - Host build bersama bisa menjalankan layanan produksi. Jangan menghentikan,
