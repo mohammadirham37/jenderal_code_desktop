@@ -25,7 +25,8 @@ interface UpdaterState {
   setDialogOpen: (open: boolean) => void;
 }
 
-const FIRST_CHECK_MS = 10_000;
+/** The launch check runs right away (after the IPC bridge is up). */
+const FIRST_CHECK_MS = 1_500;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 export const useUpdater = create<UpdaterState>((set, get) => ({
@@ -77,9 +78,15 @@ export function startUpdateChecks() {
   void getVersion().then((current) => useUpdater.setState({ current }));
   // Not in `vite dev` without Tauri, and not while developing the app.
   if (import.meta.env.DEV) return;
-  const quietCheck = () => {
-    if (useUpdater.getState().status !== "available") void useUpdater.getState().checkNow(true);
+  const quietCheck = async () => {
+    if (useUpdater.getState().status !== "available") await useUpdater.getState().checkNow(true);
   };
-  setTimeout(quietCheck, FIRST_CHECK_MS);
-  setInterval(quietCheck, CHECK_EVERY_MS);
+  // At launch, a new version opens the dialog right away; later checks
+  // only light up the sidebar button, so they never interrupt work.
+  setTimeout(() => {
+    void quietCheck().then(() => {
+      if (useUpdater.getState().status === "available") useUpdater.getState().setDialogOpen(true);
+    });
+  }, FIRST_CHECK_MS);
+  setInterval(() => void quietCheck(), CHECK_EVERY_MS);
 }
