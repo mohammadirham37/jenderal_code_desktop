@@ -60,9 +60,19 @@ export function AgentUsageButton() {
 
   return (
     <div ref={ref} className="relative flex items-center">
-      <IconButton title="Agent usage" className="h-6 w-6" onClick={() => setOpen((o) => !o)}>
-        <Gauge size={13} />
-      </IconButton>
+      <button
+        title="Subscription limits of your agent CLIs (Claude Code, Codex, …)"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`ml-0.5 flex h-6 items-center gap-1.5 rounded-[4px] px-2 font-mono text-[10.5px] tracking-wide transition-colors ${
+          open
+            ? "bg-accent-500/10 text-accent-700 dark:text-accent-300"
+            : "text-neutral-500 hover:bg-neutral-200/70 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+        }`}
+      >
+        <Gauge size={12} />
+        Usage
+      </button>
       {open && (
         <div className="animate-rise absolute left-0 top-full z-30 mt-1 w-80 rounded-[6px] border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
           <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
