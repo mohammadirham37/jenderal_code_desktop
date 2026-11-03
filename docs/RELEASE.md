@@ -39,7 +39,9 @@ cadangan.
 
 App memeriksa `https://github.com/<owner>/<repo>/releases/latest/download/latest.json`
 (lihat `plugins.updater` di `tauri.conf.json`) saat dibuka lalu tiap 6 jam,
-dan menampilkan tombol update di sidebar serta di Settings → Updates.
+dan menampilkan tombol update di sidebar, di kanan atas halaman Projects dan
+title bar workspace (`UpdateButton`, juga untuk cek manual), serta di
+Settings → Updates.
 Bundle update ditandatangani (minisign); app hanya memasang bundle yang
 cocok dengan `pubkey` di `tauri.conf.json`.
 

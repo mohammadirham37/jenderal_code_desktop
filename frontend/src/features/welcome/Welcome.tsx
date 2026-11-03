@@ -5,6 +5,7 @@ import { ArrowUpRight, FolderOpen, GitBranch, Plug, Trash2 } from "lucide-react"
 import { useApp, type LayoutMode } from "@/stores/app";
 import { Button } from "@/components/ui";
 import { Logo, Wordmark } from "@/components/Logo";
+import { UpdateButton } from "@/components/UpdateButton";
 import { formatRelative } from "@/lib/format";
 
 const MODES: { id: LayoutMode; title: string; desc: string }[] = [
@@ -36,7 +37,10 @@ export function Welcome() {
   };
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="relative h-full overflow-y-auto">
+      <div className="absolute top-4 right-5 z-10">
+        <UpdateButton showVersion />
+      </div>
       <div className="mx-auto grid min-h-full max-w-6xl grid-cols-1 gap-x-14 gap-y-10 px-10 py-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
         {/* Left: identity, actions, layout */}
         <section className="stagger flex flex-col">

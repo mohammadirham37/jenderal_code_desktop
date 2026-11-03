@@ -11,6 +11,7 @@ import { LazyEditorPane, LazyGitPanel, LazyTerminalPanel, PanelSuspense } from "
 import { useResizable } from "./useResizable";
 import { useApp, type LayoutMode } from "@/stores/app";
 import { IconButton } from "@/components/ui";
+import { UpdateButton } from "@/components/UpdateButton";
 
 export function WorkspacePage() {
   const workspace = useApp((s) => s.workspace);
@@ -29,7 +30,8 @@ export function WorkspacePage() {
             <GitBranch size={10} /> git
           </span>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <UpdateButton />
           <LayoutSwitch />
         </div>
       </div>
