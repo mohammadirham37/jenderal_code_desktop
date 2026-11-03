@@ -27,6 +27,9 @@ interface EditorState {
   expandedDirs: Set<string>;
   /** Manual per-file language overrides for syntax highlighting. */
   langOverrides: Record<string, string>;
+  /** Bumped by every openFile/openDiff, so layouts can reveal the editor
+   *  even when the opened tab was already active. */
+  revealTick: number;
 
   openFile: (path: string) => Promise<void>;
   openDiff: (key: string, title: string, diff: string) => Promise<void>;
@@ -48,16 +51,18 @@ export const useEditor = create<EditorState>((set, get) => ({
   activeKey: null,
   expandedDirs: new Set<string>(),
   langOverrides: {},
+  revealTick: 0,
 
   openFile: async (path) => {
     const key = fileKey(path);
     const existing = get().tabs.find((t) => t.kind === "file" && fileKey(t.path) === key);
     if (existing) {
-      set({ activeKey: key });
+      set((s) => ({ activeKey: key, revealTick: s.revealTick + 1 }));
       return;
     }
     const res = await api.fsRead(path);
     set((s) => ({
+      revealTick: s.revealTick + 1,
       tabs: [
         ...s.tabs,
         { kind: "file", path, content: res.content, original: res.content, dirty: false },
@@ -72,10 +77,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       set((s) => ({
         tabs: s.tabs.map((t) => (t.kind === "diff" && t.key === key ? { ...t, diff } : t)),
         activeKey: key,
+        revealTick: s.revealTick + 1,
       }));
       return;
     }
-    set((s) => ({ tabs: [...s.tabs, { kind: "diff", key, title, diff }], activeKey: key }));
+    set((s) => ({ tabs: [...s.tabs, { kind: "diff", key, title, diff }], activeKey: key, revealTick: s.revealTick + 1 }));
   },
 
   closeTab: (key) => {

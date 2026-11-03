@@ -30,6 +30,7 @@ export function CommandPalette() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        useApp.getState().setQuickOpen(false);
         setPaletteOpen(!openState);
       }
       if (e.key === "Escape") setPaletteOpen(false);
@@ -72,6 +73,12 @@ export function CommandPalette() {
       },
     ];
     if (workspace) {
+      cmds.push({
+        id: "quick-open",
+        label: "Go to file…",
+        hint: navigator.platform.toUpperCase().includes("MAC") ? "⌘P" : "Ctrl+P",
+        run: () => useApp.getState().setQuickOpen(true),
+      });
       cmds.push({
         id: "new-session",
         label: "New chat session",

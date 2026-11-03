@@ -70,7 +70,7 @@ export function BrowserPanel({ id }: { id: string }) {
       frame = requestAnimationFrame(tick);
       if (!openRef.current) return;
       const b = boundsOf();
-      const visible = b !== null && !useApp.getState().paletteOpen && document.visibilityState === "visible";
+      const visible = b !== null && !useApp.getState().paletteOpen && !useApp.getState().quickOpen && document.visibilityState === "visible";
       const key = visible && b ? `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)},${Math.round(b.height)}` : "hidden";
       if (key === last) return;
       const wasHidden = last === "hidden" || last === "";

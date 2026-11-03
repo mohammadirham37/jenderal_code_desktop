@@ -31,6 +31,8 @@ interface AppState {
   recent: WorkspaceInfo[];
   settings: AppSettings;
   paletteOpen: boolean;
+  /** Quick Open file search (⌘P / Ctrl+P). */
+  quickOpen: boolean;
   ready: boolean;
   zoom: number;
   layout: LayoutMode;
@@ -39,6 +41,7 @@ interface AppState {
   setView: (v: View) => void;
   setLayout: (mode: LayoutMode) => void;
   setPaletteOpen: (open: boolean) => void;
+  setQuickOpen: (open: boolean) => void;
   openWorkspacePath: (path: string) => Promise<void>;
   openFolderPicker: () => Promise<void>;
   closeWorkspace: () => Promise<void>;
@@ -87,6 +90,7 @@ export const useApp = create<AppState>((set, get) => ({
     mcp_trusted_projects: [],
   },
   paletteOpen: false,
+  quickOpen: false,
   ready: false,
   zoom: readStoredZoom(),
   layout: readStoredLayout(),
@@ -126,6 +130,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ layout });
   },
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setQuickOpen: (quickOpen) => set({ quickOpen }),
 
   openWorkspacePath: async (path) => {
     const ws = await api.openWorkspace(path);

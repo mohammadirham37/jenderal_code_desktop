@@ -63,6 +63,7 @@ export function ChatLayout() {
 
   // Opening a file or diff from the chat (or explorer) reveals the editor.
   const activeKey = useEditor((s) => s.activeKey);
+  const revealTick = useEditor((s) => s.revealTick);
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
@@ -70,7 +71,7 @@ export function ChatLayout() {
       return;
     }
     if (activeKey) showTab("editor");
-  }, [activeKey]);
+  }, [activeKey, revealTick]);
 
   return (
     <div className="flex min-h-0 flex-1">
