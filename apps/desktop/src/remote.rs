@@ -36,8 +36,12 @@ pub const EVENT_REMOTE_SESSIONS: &str = "remote://sessions";
 /// point the app at another relay.
 pub const RELAY_URL: &str = "https://backendcode.jenderalcorp.com";
 
-/// Where the phone app is downloaded (GitHub releases of jenderalcode_mobile).
+/// The phone app's release page (GitHub releases of jenderalcode_mobile).
 pub const MOBILE_DOWNLOAD_URL: &str = "https://github.com/mohammadirham37/jenderalcode_mobile/releases/latest";
+/// Direct link to the newest APK (stable asset name), for the QR code: one
+/// scan with the phone starts the download.
+pub const MOBILE_APK_URL: &str =
+    "https://github.com/mohammadirham37/jenderalcode_mobile/releases/latest/download/JenderalCode-Mobile.apk";
 
 const KEY_ACCOUNT: &str = "remote:key";
 const DEVICE_ACCOUNT: &str = "remote:device";
@@ -1383,8 +1387,11 @@ impl EventSink for RemoteController {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MobileDownload {
+    /// Release page (opened in the browser).
     pub url: String,
-    /// QR code of `url` (SVG), for scanning with the phone's camera.
+    /// Direct APK link encoded in the QR code.
+    pub apk_url: String,
+    /// QR code of `apk_url` (SVG), for scanning with the phone's camera.
     pub qr_svg: String,
 }
 
@@ -1392,7 +1399,8 @@ pub struct MobileDownload {
 pub fn remote_mobile_download() -> Result<MobileDownload, String> {
     Ok(MobileDownload {
         url: MOBILE_DOWNLOAD_URL.to_string(),
-        qr_svg: qr_svg(MOBILE_DOWNLOAD_URL).map_err(|e| format!("{e:#}"))?,
+        apk_url: MOBILE_APK_URL.to_string(),
+        qr_svg: qr_svg(MOBILE_APK_URL).map_err(|e| format!("{e:#}"))?,
     })
 }
 

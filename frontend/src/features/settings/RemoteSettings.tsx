@@ -212,39 +212,50 @@ export function RemoteSettings() {
   );
 }
 
-/** Where to get the Android app: QR to scan with the phone, or open in the browser. */
-function MobileAppCard() {
-  const [dl, setDl] = useState<{ url: string; qr_svg: string } | null>(null);
-  const [showQr, setShowQr] = useState(false);
+type MobileDownload = { url: string; apk_url: string; qr_svg: string };
+
+function useMobileDownload() {
+  const [dl, setDl] = useState<MobileDownload | null>(null);
   useEffect(() => {
     void api.remoteMobileDownload().then(setDl).catch(() => {});
   }, []);
+  return dl;
+}
+
+function DownloadQr({ dl, size }: { dl: MobileDownload; size: "sm" | "md" }) {
+  return (
+    <img
+      alt="QR code: download JenderalCode Mobile"
+      className={`${size === "sm" ? "h-28 w-28" : "h-36 w-36"} shrink-0 rounded-[4px] bg-white p-1`}
+      src={`data:image/svg+xml;utf8,${encodeURIComponent(dl.qr_svg)}`}
+    />
+  );
+}
+
+/** Where to get the Android app: a QR code that downloads the APK, or the
+ *  release page in the browser. */
+function MobileAppCard() {
+  const dl = useMobileDownload();
   if (!dl) return null;
   return (
-    <div className="flex gap-3 rounded-[5px] border border-neutral-200 px-3 py-2.5 dark:border-neutral-800">
-      <Smartphone size={16} className="mt-0.5 shrink-0 text-accent-500" />
+    <div className="ticks flex gap-4 rounded-[5px] border border-neutral-200 px-3 py-3 dark:border-neutral-800">
+      <DownloadQr dl={dl} size="md" />
       <div className="min-w-0 flex-1">
+        <div className="eyebrow mb-1">Phone app</div>
         <div className="font-medium">JenderalCode Mobile for Android</div>
-        <p className="mt-0.5 text-[11px] text-neutral-500">
-          Install the phone app first, then pair it here. Scan the code with your phone&apos;s camera to download it.
+        <p className="mt-1 text-[11px] text-neutral-500">
+          Scan the code with your phone&apos;s camera to download the app, install it, then pair it here with
+          &nbsp;<span className="font-medium">Pair a phone</span>. The app updates itself from then on.
         </p>
-        <div className="mt-1 truncate font-mono text-[10.5px] text-neutral-500">{dl.url}</div>
-        <div className="mt-2 flex gap-1.5">
-          <Button size="sm" onClick={() => setShowQr((v) => !v)}>
-            <QrCode size={12} /> {showQr ? "Hide QR code" : "Show QR code"}
-          </Button>
+        <div className="mt-1.5 truncate font-mono text-[10.5px] text-neutral-500" title={dl.apk_url}>
+          {dl.apk_url}
+        </div>
+        <div className="mt-2">
           <Button size="sm" onClick={() => void api.remoteOpenMobileDownload().catch(() => {})}>
             <ExternalLink size={12} /> Open download page
           </Button>
         </div>
       </div>
-      {showQr && (
-        <img
-          alt="Download JenderalCode Mobile"
-          className="h-28 w-28 shrink-0 rounded-[4px] bg-white p-1"
-          src={`data:image/svg+xml;utf8,${encodeURIComponent(dl.qr_svg)}`}
-        />
-      )}
     </div>
   );
 }
@@ -274,6 +285,8 @@ function PairingDialog({
   onConfirm: (accept: boolean) => void;
 }) {
   const left = useCountdown(pairing.expires_at);
+  const dl = useMobileDownload();
+  const [showDownload, setShowDownload] = useState(false);
   const mine = outcome && outcome.pairing_id === pairing.pairing_id ? outcome : null;
   const sas = mine?.sas ? `${mine.sas.slice(0, 3)} ${mine.sas.slice(3)}` : null;
 
@@ -298,11 +311,17 @@ function PairingDialog({
               No app yet?{" "}
               <button
                 className="inline-flex items-center gap-0.5 text-accent-600 underline-offset-2 hover:underline dark:text-accent-300"
-                onClick={() => void api.remoteOpenMobileDownload().catch(() => {})}
+                onClick={() => setShowDownload((v) => !v)}
               >
-                <Download size={11} /> Get JenderalCode Mobile
+                <Download size={11} /> {showDownload ? "Hide download code" : "Scan to download the app"}
               </button>
             </p>
+            {showDownload && dl && (
+              <div className="mt-3 flex flex-col items-center gap-1 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+                <DownloadQr dl={dl} size="sm" />
+                <span className="text-[10.5px] text-neutral-500">Download JenderalCode Mobile, then scan the pairing code above.</span>
+              </div>
+            )}
             {left === 0 && (
               <div className="mt-3 flex justify-center">
                 <Button size="sm" onClick={onRetry}>

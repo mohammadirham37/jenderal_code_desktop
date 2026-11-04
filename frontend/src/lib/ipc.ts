@@ -602,7 +602,8 @@ export const api = {
   // Remote control
   remoteStatus: () => invoke<RemoteStatus>("remote_status"),
   /** Download page of the Android app, with a QR code to scan. */
-  remoteMobileDownload: () => invoke<{ url: string; qr_svg: string }>("remote_mobile_download"),
+  remoteMobileDownload: () =>
+    invoke<{ url: string; apk_url: string; qr_svg: string }>("remote_mobile_download"),
   /** Open that page in the system browser (fixed URL). */
   remoteOpenMobileDownload: () => invoke<void>("remote_open_mobile_download"),
   remoteApplySettings: () => invoke<RemoteStatus>("remote_apply_settings"),
