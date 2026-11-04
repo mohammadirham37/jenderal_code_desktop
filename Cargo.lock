@@ -1936,7 +1936,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-agent-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "jcode-common",
@@ -1948,7 +1948,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-agent-runtime"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1978,7 +1978,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-common"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "serde",
@@ -1988,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-e2e-tests"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2005,7 +2005,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-permissions"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "jcode-common",
  "serde",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-provider-anthropic"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2029,7 +2029,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-provider-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-provider-google"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-provider-openai"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2076,7 +2076,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-remote"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2099,7 +2099,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-storage"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2113,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-tool-filesystem"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-tool-git"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2141,7 +2141,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-tool-lsp"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "jcode-tool-terminal",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-tool-mcp"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "futures",
@@ -2165,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "jcode-tool-terminal"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "jcode-common",
@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "jenderalcode-desktop"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-trait",
