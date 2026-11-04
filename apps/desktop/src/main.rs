@@ -184,6 +184,7 @@ fn main() {
             commands::fs_search,
             commands::fs_glob,
             commands::fs_find_files,
+            commands::resolve_picked_attachments,
             // Credentials & providers
             commands::get_credential_backend,
             commands::switch_credential_storage,

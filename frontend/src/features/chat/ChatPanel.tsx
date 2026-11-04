@@ -248,18 +248,24 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
       multiple: true,
       directory: false,
       defaultPath: workspace.root_path,
-      title: "Attach files from this project",
+      title: "Attach project files or images",
     });
     const list = Array.isArray(selected) ? selected : selected ? [selected] : [];
-    const rel: string[] = [];
-    let rejected = 0;
-    for (const abs of list) {
-      const r = relativeTo(workspace.root_path, abs);
-      if (r) rel.push(r);
-      else rejected++;
+    if (!list.length) return;
+    try {
+      // The backend checks containment on canonical paths (symlinks,
+      // drive-letter case); images from outside the project come back as pixels.
+      const picked = await api.resolvePickedAttachments(list);
+      addAttachments(picked.relative);
+      if (picked.images.length) await addImages(picked.images.map(imageBlob));
+      const n = picked.rejected.length;
+      if (n)
+        setNotice(
+          `${n} file(s) outside the project were not attached. Only images can be attached from outside the project.`,
+        );
+    } catch (e) {
+      setNotice(`Could not attach the files: ${String(e)}`);
     }
-    addAttachments(rel);
-    if (rejected) setNotice(`${rejected} file(s) outside the project were not attached.`);
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -1524,10 +1530,10 @@ function MenuItem({
 }
 
 /** Workspace-relative path for `abs`, or null if it is outside `root`. */
-function relativeTo(root: string, abs: string): string | null {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-  const r = norm(root);
-  const a = norm(abs);
-  if (a === r || !a.startsWith(`${r}/`)) return null;
-  return a.slice(r.length + 1);
+/** An image attachment from the backend as a Blob, for `prepareImage`. */
+function imageBlob(img: ImageAttachment): Blob {
+  const bin = atob(img.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: img.mime });
 }

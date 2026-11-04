@@ -242,6 +242,78 @@ pub async fn fs_find_files(state: State<'_, AppState>, query: String) -> CmdResu
     with_workspace(&state, move |ws| Ok(ws.find_files(&query, 30))).await
 }
 
+/// Files the user picked in the attach dialog, sorted out by the backend so
+/// symlinks, drive-letter case and `\\?\` prefixes do not matter:
+/// project files become `@` attachments (relative paths), images from
+/// anywhere become image attachments, anything else is refused.
+#[derive(serde::Serialize)]
+pub struct PickedAttachments {
+    relative: Vec<String>,
+    images: Vec<jcode_common::ImageAttachment>,
+    rejected: Vec<String>,
+}
+
+/// Image size accepted from the attach dialog before scaling in the webview.
+const MAX_PICKED_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+fn picked_image_mime(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return None,
+    })
+}
+
+#[tauri::command]
+pub async fn resolve_picked_attachments(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> CmdResult<PickedAttachments> {
+    with_workspace(&state, move |ws| Ok(sort_picked(&ws, paths))).await
+}
+
+fn sort_picked(ws: &Workspace, paths: Vec<String>) -> PickedAttachments {
+    use base64::Engine;
+    {
+        let mut out = PickedAttachments { relative: vec![], images: vec![], rejected: vec![] };
+        for p in paths {
+            let path = Path::new(&p);
+            // Inside the project (symlink-safe containment check).
+            if let Ok(canon) = ws.resolve(&p) {
+                if canon.is_file() {
+                    if let Ok(rel) = canon.strip_prefix(ws.root()) {
+                        let rel = rel.to_string_lossy().replace('\\', "/");
+                        if !rel.is_empty() {
+                            out.relative.push(rel);
+                            continue;
+                        }
+                    }
+                }
+            }
+            // An image the user picked: attach its pixels, not its path.
+            let image = picked_image_mime(path).and_then(|mime| {
+                let meta = std::fs::metadata(path).ok()?;
+                if !meta.is_file() || meta.len() > MAX_PICKED_IMAGE_BYTES {
+                    return None;
+                }
+                let bytes = std::fs::read(path).ok()?;
+                Some(jcode_common::ImageAttachment {
+                    mime: mime.to_string(),
+                    data: base64::engine::general_purpose::STANDARD.encode(bytes),
+                })
+            });
+            match image {
+                Some(img) => out.images.push(img),
+                None => out.rejected.push(p),
+            }
+        }
+        out
+    }
+}
+
 #[tauri::command]
 pub async fn fs_glob(state: State<'_, AppState>, pattern: String) -> CmdResult<Vec<String>> {
     with_workspace(&state, move |ws| ws.glob_files(&pattern, 500).map_err(err)).await
@@ -1189,6 +1261,36 @@ fn _arc_guard(_: Arc<Db>) {}
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn picked_files_resolve_through_symlinks_and_keep_outside_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("proj");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(dir.path().join("shot.png"), b"\x89PNG").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        let ws = Workspace::open(&root).unwrap();
+        let mut picked = vec![
+            root.join("src/main.rs").to_string_lossy().to_string(),
+            dir.path().join("shot.png").to_string_lossy().to_string(),
+            dir.path().join("notes.txt").to_string_lossy().to_string(),
+        ];
+        // The dialog may hand back a path through a symlink to the project.
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("link");
+            std::os::unix::fs::symlink(&root, &link).unwrap();
+            picked.push(link.join("src/main.rs").to_string_lossy().to_string());
+        }
+        let out = sort_picked(&ws, picked);
+        assert_eq!(out.relative[0], "src/main.rs");
+        assert!(out.relative.iter().all(|r| r == "src/main.rs"));
+        assert_eq!(out.images.len(), 1);
+        assert_eq!(out.images[0].mime, "image/png");
+        assert_eq!(out.rejected.len(), 1);
+        assert!(out.rejected[0].ends_with("notes.txt"));
+    }
+
     use super::*;
 
     #[test]

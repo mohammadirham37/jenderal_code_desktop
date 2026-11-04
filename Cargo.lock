@@ -2180,6 +2180,7 @@ version = "0.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "jcode-agent-cli",
  "jcode-agent-runtime",

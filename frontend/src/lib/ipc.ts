@@ -504,6 +504,12 @@ export const api = {
     invoke<FileEntry[]>("fs_list", { path: path ?? null, showHidden: showHidden ?? null }),
   /** Project files matching `query`, best first (for `@` mentions). */
   fsFindFiles: (query: string) => invoke<string[]>("fs_find_files", { query }),
+  /** Sort files picked in the attach dialog: project files (relative paths),
+   *  images from anywhere, and the rest (refused). */
+  resolvePickedAttachments: (paths: string[]) =>
+    invoke<{ relative: string[]; images: ImageAttachment[]; rejected: string[] }>("resolve_picked_attachments", {
+      paths,
+    }),
   fsRead: (path: string) => invoke<{ path: string; content: string }>("fs_read", { path }),
   fsWrite: (path: string, content: string) => invoke<void>("fs_write", { path, content }),
   fsCreate: (path: string, isDir: boolean) => invoke<void>("fs_create", { path, isDir }),
