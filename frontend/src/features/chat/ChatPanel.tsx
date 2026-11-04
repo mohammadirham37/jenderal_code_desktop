@@ -6,6 +6,8 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useShallow } from "zustand/react/shallow";
 import {
   ArrowDown,
@@ -123,6 +125,9 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  /** Files from the OS are being dragged over the composer. */
+  const [dragOver, setDragOver] = useState(false);
   const slash = useSlashMenu(input, setInput);
   const mention = useMentionMenu(input, setInput, textareaRef, (path) => addAttachments([path]));
 
@@ -242,31 +247,71 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
       return next;
     });
 
-  const pickFiles = async () => {
-    if (!workspace) return;
-    const selected = await openDialog({
-      multiple: true,
-      directory: false,
-      defaultPath: workspace.root_path,
-      title: "Attach project files or images",
-    });
-    const list = Array.isArray(selected) ? selected : selected ? [selected] : [];
-    if (!list.length) return;
+  /** Attach OS file paths (dialog or drop): project files as `@` chips,
+   *  images as images, anything else as its path typed into the message. */
+  const attachPaths = async (list: string[]) => {
+    if (!workspace || !list.length) return;
     try {
       // The backend checks containment on canonical paths (symlinks,
       // drive-letter case); images from outside the project come back as pixels.
       const picked = await api.resolvePickedAttachments(list);
       addAttachments(picked.relative);
       if (picked.images.length) await addImages(picked.images.map(imageBlob));
-      const n = picked.rejected.length;
-      if (n)
-        setNotice(
-          `${n} file(s) outside the project were not attached. Only images can be attached from outside the project.`,
-        );
+      if (picked.rejected.length) {
+        const text = picked.rejected.map((p) => (/\s/.test(p) ? `"${p}"` : p)).join(" ");
+        setInput((cur) => `${cur}${cur && !/\s$/.test(cur) ? " " : ""}${text} `);
+        textareaRef.current?.focus();
+      }
     } catch (e) {
       setNotice(`Could not attach the files: ${String(e)}`);
     }
   };
+
+  const pickFiles = async () => {
+    if (!workspace) return;
+    const selected = await openDialog({
+      multiple: true,
+      directory: false,
+      defaultPath: workspace.root_path,
+      title: "Attach files",
+    });
+    await attachPaths(Array.isArray(selected) ? selected : selected ? [selected] : []);
+  };
+
+  // Files dropped from Finder/Explorer arrive as a native drag-drop event
+  // with paths (HTML drop events never see them); only drops on this
+  // composer count. Positions are physical px; the webview is zoomed natively.
+  const attachRef = useRef(attachPaths);
+  attachRef.current = attachPaths;
+  useEffect(() => {
+    if (!workspace) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const inside = async (pos: { x: number; y: number }) => {
+      const el = composerRef.current;
+      if (!el || el.offsetParent === null) return false;
+      const scale = (await getCurrentWindow().scaleFactor()) * useApp.getState().zoom;
+      const x = pos.x / scale;
+      const y = pos.y / scale;
+      const r = el.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    void getCurrentWebview()
+      .onDragDropEvent(async (ev) => {
+        const p = ev.payload;
+        if (p.type === "leave") return setDragOver(false);
+        const over = await inside(p.position);
+        if (p.type === "drop") {
+          setDragOver(false);
+          if (over) void attachRef.current(p.paths);
+        } else setDragOver(over);
+      })
+      .then((u) => (cancelled ? u() : (unlisten = u)));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [workspace]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -424,10 +469,16 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
             }}
           />
           <div
-            className={`relative rounded-md border border-neutral-300 bg-white transition-colors focus-within:border-accent-500 dark:border-neutral-700 dark:bg-neutral-925 ${
-              full ? "shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)]" : ""
-            }`}
+            ref={composerRef}
+            className={`relative rounded-md border bg-white transition-colors focus-within:border-accent-500 dark:bg-neutral-925 ${
+              dragOver ? "ticks border-accent-500" : "border-neutral-300 dark:border-neutral-700"
+            } ${full ? "shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)]" : ""}`}
           >
+            {dragOver && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-accent-500/10 font-mono text-[11px] uppercase tracking-wider text-accent-600 dark:text-accent-400">
+                Drop to attach · project files as @, images as images, other files as paths
+              </div>
+            )}
             {images.length > 0 && (
               <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
                 {images.map((img, i) => (
@@ -542,7 +593,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
             <div className="mt-1.5 text-center text-[10px] text-neutral-400">
               {busy
                 ? `Enter to queue · ${isMac ? "⌘" : "Ctrl+"}Enter to steer the running turn · Shift+Enter for newline`
-                : `Enter to send · Shift+Enter for newline · @ to attach a file${vision === false ? "" : " · paste images"}`}
+                : `Enter to send · Shift+Enter for newline · @ to attach a file · drop files here${vision === false ? "" : " · paste images"}`}
             </div>
           )}
         </div>
