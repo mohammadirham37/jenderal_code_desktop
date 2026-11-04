@@ -2,7 +2,7 @@
  *  agent-CLI tabs opened from the "+" menu. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Bot, MessageSquare, Plus, RotateCcw, Settings, ShieldOff, Terminal as TerminalIcon, X } from "lucide-react";
+import { Bot, MessageSquare, Plus, RotateCcw, Settings, ShieldOff, Smartphone, Terminal as TerminalIcon, X } from "lucide-react";
 import { ChatPanel } from "@/features/chat/ChatPanel";
 import { useApp } from "@/stores/app";
 import { CHAT_TAB, useCenterTabs, type CenterTab } from "@/stores/centerTabs";
@@ -31,9 +31,26 @@ export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trail
             <TabButton
               key={t.id}
               active={t.id === activeId}
-              icon={t.bypass ? <ShieldOff size={12} className="text-red-500" /> : t.agentId ? <Bot size={12} /> : <TerminalIcon size={12} />}
+              icon={
+                t.bypass ? (
+                  <ShieldOff size={12} className="text-red-500" />
+                ) : t.remote ? (
+                  <Smartphone size={12} />
+                ) : t.agentId ? (
+                  <Bot size={12} />
+                ) : (
+                  <TerminalIcon size={12} />
+                )
+              }
               label={t.title}
-              title={t.bypass ? `${t.title}: permission checks bypassed` : undefined}
+              title={
+                [
+                  t.remote && `${t.title}: opened from the phone (sized like the phone)`,
+                  t.bypass && `${t.title}: permission checks bypassed`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              }
               dim={t.exited}
               onClick={() => useCenterTabs.getState().setActive(t.id)}
               onClose={() => void confirmClose(t)}

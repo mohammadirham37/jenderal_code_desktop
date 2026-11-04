@@ -281,7 +281,7 @@ terminal yang dibuka dari ponsel.
 |---|---|---|
 | `session.set_policy` | `{session_id, mode:"safe"\|"balanced"\|"yolo"}` | `{session:Session}`. `yolo` butuh `full_access`. Ponsel wajib meminta konfirmasi user sebelum mengirim `yolo`. |
 | `terminal.list` | `{}` | `{terminals:[Terminal]}`. Terminal yang sedang berjalan: tab terminal dan agent CLI di desktop (`origin:"desktop"`) dan yang dibuka dari ponsel (`origin:"remote"`). |
-| `terminal.open` | `{workspace_id, cols, rows}` | `{terminal:Terminal}`. Shell baru di folder proyek (`origin:"remote"`, maks. 6 per desktop, termasuk sesi agent CLI §6.9). Tidak tampil sebagai tab di desktop. |
+| `terminal.open` | `{workspace_id, cols, rows}` | `{terminal:Terminal}`. Shell baru di folder proyek (`origin:"remote"`, maks. 6 per desktop, termasuk sesi agent CLI §6.9). Desktop juga menampilkannya sebagai tab proyek itu (PTY yang sama). Ukurannya tetap mengikuti ponsel. |
 | `terminal.attach` | `{terminal_id}` | `{terminal:Terminal, scrollback:string}`. Output terakhir (≤ 128 KiB), lalu event `terminal.data`/`terminal.exit`/`terminal.resized` mulai dikirim. |
 | `terminal.detach` | `{terminal_id}` | `{}` |
 | `terminal.input` | `{terminal_id, data}` | `{}`. Teks yang diketik (≤ 64 KiB), termasuk escape sequence tombol. |
@@ -295,6 +295,11 @@ response attach boleh dibuang karena isinya sudah ada di `scrollback`.
 Koneksi baru mulai tanpa attach. Saat ponsel offline, attach-nya dilepas,
 tetapi terminal `origin:"remote"` tetap berjalan sampai ditutup atau desktop
 keluar, sehingga bisa di-attach lagi.
+
+Terminal `origin:"remote"` tampil di desktop sebagai tab proyeknya. Input dan
+output tab itu sama dengan yang terlihat di ponsel. Tab desktop memakai ukuran
+ponsel dan tidak me-resize PTY. Menutup tab di desktop mengakhiri terminal,
+lalu ponsel menerima `terminal.exit`.
 
 ### 6.6 Chat lengkap (seperti Chat layout desktop)
 

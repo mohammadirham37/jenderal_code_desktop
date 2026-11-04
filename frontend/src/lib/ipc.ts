@@ -450,6 +450,26 @@ export interface ChatErrorEvent {
 export interface TerminalDataEvent {
   terminal_id: string;
   data: string;
+  /** Output bytes so far, including this chunk (see `terminalSnapshot`). */
+  seq: number;
+}
+
+/** Recent output of a running terminal, its end `seq` and PTY size. */
+export interface TerminalSnapshot {
+  data: string;
+  seq: number;
+  cols: number;
+  rows: number;
+}
+
+/** A paired phone opened a terminal (a shell or an agent CLI). */
+export interface RemoteTerminalEvent {
+  terminal_id: string;
+  workspace_id: string;
+  title: string;
+  command: string | null;
+  agent_id: string | null;
+  bypass: boolean;
 }
 
 export interface TerminalExitEvent {
@@ -628,6 +648,7 @@ export const api = {
   browserClose: (id: string) => invoke<void>("browser_close", { id }),
 
   // Terminals
+  terminalSnapshot: (id: string) => invoke<TerminalSnapshot>("terminal_snapshot", { id }),
   /** `title` is the tab label, shown to paired phones. */
   terminalCreate: (id: string, cols?: number, rows?: number, command?: string, title?: string, bypass?: boolean) =>
     invoke<void>("terminal_create", {
@@ -700,4 +721,8 @@ export const events = {
   /** A session was created from the phone. */
   remoteSessions: (cb: (e: { workspace_id: string }) => void): Promise<UnlistenFn> =>
     listen<{ workspace_id: string }>("remote://sessions", (ev) => cb(ev.payload)),
+  remoteTerminal: (cb: (e: RemoteTerminalEvent) => void): Promise<UnlistenFn> =>
+    listen<RemoteTerminalEvent>("remote://terminal", (ev) => cb(ev.payload)),
+  terminalResized: (cb: (e: { terminal_id: string; cols: number; rows: number }) => void): Promise<UnlistenFn> =>
+    listen<{ terminal_id: string; cols: number; rows: number }>("terminal://resized", (ev) => cb(ev.payload)),
 };

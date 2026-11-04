@@ -118,8 +118,13 @@ Spesifikasi lengkap: `docs/REMOTE_PROTOCOL.md`. Tiga bagian: desktop (repo ini),
 - `apps/desktop/src/remote.rs` (`RemoteController`): pairing QR + kode 6 digit, dispatch
   request ponsel ke `AgentRuntime`/`Db`, dan `EventSink` untuk event sesi yang di-subscribe
   ponsel. `sink::FanoutSink` mengirim event ke webview dan ke ponsel sekaligus.
-- Relay tidak dipercaya: ia hanya melihat ciphertext. Sesi full access (Yolo) tidak bisa
-  dikendalikan dari ponsel, dan approval dari ponsel tidak pernah menjadi grant permanen.
+- Terminal dan agent CLI (Claude Code, Codex, dll.) yang dibuka dari ponsel tampil juga sebagai
+  tab tengah di proyeknya di desktop. Keduanya memakai PTY yang sama, jadi apa yang diketik di
+  ponsel terlihat di desktop. `terminal_snapshot` + `seq` pada `terminal://data` memastikan
+  tidak ada output yang hilang atau terulang.
+- Relay tidak dipercaya: ia hanya melihat ciphertext. Full access (Yolo), terminal, dan semua
+  aksi tulis dari ponsel hanya bisa dipakai bila "Allow full access" diaktifkan di desktop.
+  Approval dari ponsel tidak pernah menjadi grant permanen.
 
 ## Debugging tips
 

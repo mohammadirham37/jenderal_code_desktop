@@ -4,9 +4,11 @@
  *  switching back restores them. They end when closed, when their project
  *  is closed or removed, or when the app quits. The tab list is saved, so
  *  after a restart each project's tabs come back the first time it is
- *  shown, agent CLIs continuing their last conversation (`resume_args`). */
+ *  shown, agent CLIs continuing their last conversation (`resume_args`).
+ *  Terminals a paired phone opens join their project's tabs too (same PTY,
+ *  shown at the phone's size until restarted here). */
 import { create } from "zustand";
-import { api, events, type AgentCli } from "@/lib/ipc";
+import { api, events, type AgentCli, type RemoteTerminalEvent } from "@/lib/ipc";
 import { onWorkspaceRemoved, useApp } from "./app";
 
 export const CHAT_TAB = "chat";
@@ -21,6 +23,8 @@ export interface CenterTab {
   bypass?: boolean;
   exited: boolean;
   error?: string;
+  /** Opened from a paired phone; its size follows the phone. */
+  remote?: boolean;
 }
 
 interface ParkedTabs {
@@ -46,6 +50,8 @@ interface CenterTabsState {
   switchProject: (from: string | null, to: string | null) => void;
   /** Kill a project's tabs (open or parked). */
   killProject: (workspaceId: string) => void;
+  /** Show a terminal a phone opened as a tab of its project. */
+  adoptRemote: (e: RemoteTerminalEvent) => void;
 }
 
 // xterm.js stays out of the initial bundle until a tab is opened.
@@ -76,6 +82,10 @@ function loadSaved(): SavedProjects {
 
 /** Projects with saved tabs not shown yet in this run. */
 const unrestored: SavedProjects = loadSaved();
+
+/** Phone-opened tabs of projects neither open nor parked yet; they join the
+ *  project's tabs when it is shown. */
+const adopted: Record<string, CenterTab[]> = {};
 
 const toSaved = (t: CenterTab): SavedTab => ({
   id: t.id,
@@ -178,8 +188,11 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
     restart: async (id) => {
       const tab = get().tabs.find((t) => t.id === id);
       if (!tab) return;
-      patch(id, { exited: false, error: undefined });
-      (await registry()).writeXterm(id, "\r\n\x1b[90m[restarted]\x1b[0m\r\n");
+      // A restarted phone tab is a desktop tab: sized by the desktop.
+      patch(id, { exited: false, error: undefined, remote: false });
+      const r = await registry();
+      r.unfixXterm(id);
+      r.writeXterm(id, "\r\n\x1b[90m[restarted]\x1b[0m\r\n");
       try {
         await spawn(tab);
       } catch (e) {
@@ -220,8 +233,12 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
       set((s) => {
         const parked = { ...s.parked };
         if (from && s.tabs.length) parked[from] = { tabs: s.tabs, activeId: s.activeId };
-        const next = restored ?? (to ? parked[to] : undefined) ?? { tabs: [], activeId: CHAT_TAB };
+        let next = restored ?? (to ? parked[to] : undefined) ?? { tabs: [], activeId: CHAT_TAB };
         if (to) delete parked[to];
+        if (to && adopted[to]) {
+          next = { ...next, tabs: [...next.tabs, ...adopted[to]] };
+          delete adopted[to];
+        }
         return { parked, tabs: next.tabs, activeId: next.activeId };
       });
       if (restored?.tabs.length) respawn(restored.tabs);
@@ -231,6 +248,10 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
       if (unrestored[workspaceId]) {
         delete unrestored[workspaceId];
         persist();
+      }
+      if (adopted[workspaceId]) {
+        kill(adopted[workspaceId].map((t) => t.id));
+        delete adopted[workspaceId];
       }
       const ws = useApp.getState().workspace;
       const s = get();
@@ -246,8 +267,35 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
         set({ parked: rest });
       }
     },
+
+    adoptRemote: (e) => {
+      const s = get();
+      const known = (tabs: CenterTab[]) => tabs.some((t) => t.id === e.terminal_id);
+      if (known(s.tabs) || Object.values(s.parked).some((p) => known(p.tabs))) return;
+      listenExit();
+      const tab: CenterTab = {
+        id: e.terminal_id,
+        title: e.title,
+        command: e.command ?? undefined,
+        agentId: e.agent_id ?? undefined,
+        bypass: e.bypass,
+        exited: false,
+        remote: true,
+      };
+      void registry()
+        .then((r) => r.joinXterm(tab.id, useApp.getState().settings.terminal_font_size))
+        .catch(() => {});
+      // Added without switching to it: the user may be typing on the desktop.
+      if (useApp.getState().workspace?.id === e.workspace_id) set({ tabs: [...s.tabs, tab] });
+      else if (s.parked[e.workspace_id]) {
+        const p = s.parked[e.workspace_id];
+        set({ parked: { ...s.parked, [e.workspace_id]: { ...p, tabs: [...p.tabs, tab] } } });
+      } else (adopted[e.workspace_id] ??= []).push(tab);
+    },
   };
 });
+
+void events.remoteTerminal((e) => useCenterTabs.getState().adoptRemote(e));
 
 // Tabs follow their project: switching parks them, closing the project
 // (workspace → none) kills them. The detection cache follows the agent list.

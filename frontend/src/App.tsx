@@ -18,6 +18,8 @@ import { useEditor } from "@/stores/editor";
 import { CommandPalette } from "@/components/CommandPalette";
 import { QuickOpen } from "@/components/QuickOpen";
 import { startRemoteSync } from "@/stores/remote";
+// Loaded at startup: it listens for terminals opened from a paired phone.
+import "@/stores/centerTabs";
 import { Welcome } from "@/features/welcome/Welcome";
 import { WorkspacePage } from "@/features/workspace/WorkspacePage";
 import { Spinner } from "@/components/ui";

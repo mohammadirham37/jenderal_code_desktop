@@ -4,17 +4,22 @@
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { api, events } from "@/lib/ipc";
+import { api, events, type TerminalDataEvent } from "@/lib/ipc";
 
 interface Entry {
   term: XTerm;
   fit: FitAddon;
   el: HTMLDivElement;
   opened: boolean;
+  /** Output held back while joining a running terminal (`joinXterm`). */
+  sync: TerminalDataEvent[] | null;
+  /** PTY size owned elsewhere (a phone): show it at this size, never fit
+   *  or resize the PTY from here. */
+  fixed: { cols: number; rows: number } | null;
 }
 
 const entries = new Map<string, Entry>();
-let listening = false;
+let listening: Promise<unknown> | null = null;
 
 /** Dark palette: CLI colors are shown as the CLI sends them. */
 const DARK = {
@@ -94,13 +99,24 @@ const fontsReady: Promise<unknown> = Promise.all(
   ["400", "600"].map((w) => document.fonts.load(`${w} 12px "IBM Plex Mono"`)),
 ).catch(() => {});
 
-function listen() {
-  if (listening) return;
-  listening = true;
-  void events.terminalData((e) => entries.get(e.terminal_id)?.term.write(e.data));
-  void events.terminalExit((e) =>
-    entries.get(e.terminal_id)?.term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n"),
-  );
+function listen(): Promise<unknown> {
+  listening ??= Promise.all([
+    events.terminalData((e) => {
+      const entry = entries.get(e.terminal_id);
+      if (entry?.sync) entry.sync.push(e);
+      else entry?.term.write(e.data);
+    }),
+    events.terminalExit((e) =>
+      entries.get(e.terminal_id)?.term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n"),
+    ),
+    events.terminalResized((e) => {
+      const entry = entries.get(e.terminal_id);
+      if (!entry?.fixed) return;
+      entry.fixed = { cols: e.cols, rows: e.rows };
+      entry.term.resize(e.cols, e.rows);
+    }),
+  ]);
+  return listening;
 }
 
 export function newTerminalId(): string {
@@ -124,10 +140,13 @@ export function ensureXterm(id: string, fontSize: number): Entry {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.onData((data) => void api.terminalWrite(id, data).catch(() => {}));
-    term.onResize(({ cols, rows }) => void api.terminalResize(id, cols, rows).catch(() => {}));
+    term.onResize(({ cols, rows }) => {
+      if (entries.get(id)?.fixed) return;
+      void api.terminalResize(id, cols, rows).catch(() => {});
+    });
     const el = document.createElement("div");
     el.className = "h-full w-full";
-    entry = { term, fit, el, opened: false };
+    entry = { term, fit, el, opened: false, sync: null, fixed: null };
     entries.set(id, entry);
   }
   return entry;
@@ -156,7 +175,41 @@ export function attachXterm(id: string, host: HTMLElement, fontSize: number) {
 /** Refit to the host; skipped while hidden (zero size). */
 export function fitXterm(id: string) {
   const entry = entries.get(id);
+  if (entry?.fixed) {
+    entry.term.resize(entry.fixed.cols, entry.fixed.rows);
+    return;
+  }
   if (entry?.opened && entry.el.clientWidth > 0 && entry.el.clientHeight > 0) entry.fit.fit();
+}
+
+/** Show a terminal that was started elsewhere (by a phone): its recent
+ *  output, then live output, without gaps or repeats (`seq`). It keeps the
+ *  PTY's size, which the phone owns, until `unfixXterm`. */
+export async function joinXterm(id: string, fontSize: number) {
+  const entry = ensureXterm(id, fontSize);
+  entry.sync = [];
+  entry.fixed = { cols: entry.term.cols, rows: entry.term.rows };
+  let after = 0;
+  try {
+    await listen();
+    const snap = await api.terminalSnapshot(id);
+    entry.fixed = { cols: snap.cols, rows: snap.rows };
+    entry.term.resize(snap.cols, snap.rows);
+    entry.term.write(snap.data);
+    after = snap.seq;
+  } finally {
+    // On failure (the terminal already exited) show whatever arrived.
+    for (const e of entry.sync ?? []) if (e.seq > after) entry.term.write(e.data);
+    entry.sync = null;
+  }
+}
+
+/** Let the desktop size the terminal again (after a restart here). */
+export function unfixXterm(id: string) {
+  const entry = entries.get(id);
+  if (!entry) return;
+  entry.fixed = null;
+  fitXterm(id);
 }
 
 export function focusXterm(id: string) {

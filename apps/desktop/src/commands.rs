@@ -1011,6 +1011,15 @@ pub async fn terminal_kill(state: State<'_, AppState>, id: String) -> CmdResult<
     blocking(move || terminals.kill(&id).map_err(err)).await
 }
 
+/// Recent output of a running terminal and its end `seq` (see
+/// `TerminalDataEvent::seq`), for a tab joining a terminal opened elsewhere.
+#[tauri::command]
+pub fn terminal_snapshot(state: State<'_, AppState>, id: String) -> CmdResult<serde_json::Value> {
+    let (data, seq) = state.terminals.snapshot(&id).ok_or_else(|| format!("terminal {id} not found"))?;
+    let info = state.terminals.info(&id).ok_or_else(|| format!("terminal {id} not found"))?;
+    Ok(serde_json::json!({ "data": data, "seq": seq, "cols": info.cols, "rows": info.rows }))
+}
+
 #[tauri::command]
 pub fn terminal_list(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
     Ok(state.terminals.list())

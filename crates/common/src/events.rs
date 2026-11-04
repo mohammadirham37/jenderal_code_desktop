@@ -89,6 +89,10 @@ pub struct ChatErrorEvent {
 pub struct TerminalDataEvent {
     pub terminal_id: String,
     pub data: String,
+    /// Bytes of output so far, including this chunk; lets a late viewer
+    /// join a snapshot (`terminal_snapshot`) without gaps or repeats.
+    #[serde(default)]
+    pub seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

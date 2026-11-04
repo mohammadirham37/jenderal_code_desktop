@@ -59,12 +59,15 @@ pub enum TerminalEvent {
 
 type Observer = Arc<dyn Fn(&TerminalEvent) + Send + Sync>;
 
-/// Text ring buffer cut at char boundaries.
+/// Text ring buffer cut at char boundaries, plus the total output length
+/// (the `seq` of terminal data events).
 #[derive(Default)]
-struct Scrollback(String);
+struct Scrollback(String, u64);
 
 impl Scrollback {
-    fn push(&mut self, data: &str) {
+    /// Append and return the new total.
+    fn push(&mut self, data: &str) -> u64 {
+        self.1 += data.len() as u64;
         self.0.push_str(data);
         if self.0.len() > SCROLLBACK_BYTES + SCROLLBACK_BYTES / 4 {
             let mut cut = self.0.len() - SCROLLBACK_BYTES;
@@ -73,6 +76,7 @@ impl Scrollback {
             }
             self.0.drain(..cut);
         }
+        self.1
     }
 }
 
@@ -311,13 +315,14 @@ impl TerminalManager {
                             }
                         };
                         if !data.is_empty() {
-                            scrollback.lock().unwrap_or_else(|e| e.into_inner()).push(&data);
+                            let seq = scrollback.lock().unwrap_or_else(|e| e.into_inner()).push(&data);
                             Self::notify(&observer, TerminalEvent::Data { id: term_id.clone(), data: data.clone() });
                             let _ = app_reader.emit(
                                 EVENT_TERMINAL_DATA,
                                 TerminalDataEvent {
                                     terminal_id: term_id.clone(),
                                     data,
+                                    seq,
                                 },
                             );
                         }
@@ -403,6 +408,14 @@ impl TerminalManager {
         Some(text)
     }
 
+    /// The recent output and its end `seq`, taken atomically: data events
+    /// with a larger `seq` come after the snapshot.
+    pub fn snapshot(&self, id: &str) -> Option<(String, u64)> {
+        let sb = lock(&self.handles).get(id).map(|h| h.scrollback.clone())?;
+        let sb = sb.lock().unwrap_or_else(|e| e.into_inner());
+        Some((sb.0.clone(), sb.1))
+    }
+
     pub fn kill(&self, id: &str) -> Result<()> {
         let removed = lock(&self.handles).remove(id);
         if let Some(mut handle) = removed {
@@ -462,8 +475,10 @@ mod tests {
         }
         assert!(sb.0.len() <= SCROLLBACK_BYTES + SCROLLBACK_BYTES / 4);
         assert!(sb.0.len() >= SCROLLBACK_BYTES);
-        sb.push("END");
+        let total = sb.push("END");
         assert!(sb.0.ends_with("END"));
+        // The total counts everything written, not just what is kept.
+        assert_eq!(total, (SCROLLBACK_BYTES / 4 * 5 + 3) as u64);
     }
 
     #[test]

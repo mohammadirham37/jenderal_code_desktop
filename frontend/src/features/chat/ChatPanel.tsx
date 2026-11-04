@@ -149,8 +149,11 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
+    // Room for a few lines even when empty; a scrollbar only past the cap.
+    const [min, max] = full ? [88, 300] : [52, 200];
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, full ? 260 : 180)}px`;
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, min), max)}px`;
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
   }, [input, full]);
 
   // Ensure a session exists for this workspace.
@@ -479,8 +482,8 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                   : "Open a project first"
               }
               disabled={!workspace}
-              rows={full ? 2 : 1}
-              className={`block w-full resize-none bg-transparent px-3 pt-2.5 text-neutral-900 placeholder-neutral-400 focus:outline-none dark:text-neutral-200 ${
+              rows={full ? 3 : 2}
+              className={`block w-full resize-none overflow-x-hidden bg-transparent px-3 pt-3 leading-relaxed text-neutral-900 placeholder-neutral-400 focus:outline-none dark:text-neutral-200 ${
                 full ? "text-[13px]" : "text-xs"
               }`}
             />

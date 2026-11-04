@@ -31,6 +31,11 @@ pub const EVENT_REMOTE_STATUS: &str = "remote://status";
 pub const EVENT_REMOTE_PAIRING: &str = "remote://pairing";
 /// A session was created from the phone: the session list should reload.
 pub const EVENT_REMOTE_SESSIONS: &str = "remote://sessions";
+/// A phone opened a terminal: the desktop shows it as a tab of its project.
+pub const EVENT_REMOTE_TERMINAL: &str = "remote://terminal";
+/// A terminal's PTY size changed (desktop tabs of phone-opened terminals
+/// follow the phone's size).
+pub const EVENT_TERMINAL_RESIZED: &str = "terminal://resized";
 
 /// The official relay (docs/REMOTE_PROTOCOL.md §0). Fixed: users cannot
 /// point the app at another relay.
@@ -1056,7 +1061,7 @@ impl RemoteController {
                 let shells = terms.infos().iter().filter(|i| i.origin == TerminalOrigin::Remote && !i.agent).count();
                 let title = format!("phone shell {}", shells + 1);
                 let (cols, rows) = (size("cols", 20, 400, 80), size("rows", 5, 200, 24));
-                let info = self.open_remote_terminal(params, title, None, false, cols, rows).await?;
+                let info = self.open_remote_terminal(params, title, None, None, false, cols, rows).await?;
                 Ok(json!({ "terminal": self.terminal_json(&info, &workspaces) }))
             }
             "terminal.attach" => {
@@ -1113,6 +1118,7 @@ impl RemoteController {
         params: &Value,
         title: String,
         command: Option<String>,
+        agent_id: Option<&str>,
         bypass: bool,
         cols: u16,
         rows: u16,
@@ -1125,14 +1131,29 @@ impl RemoteController {
         }
         let id = format!("remote-{}", uuid::Uuid::new_v4());
         let (app, t, id2) = (self.app.clone(), terms.clone(), id.clone());
+        let (title2, command2) = (title.clone(), command.clone());
         tokio::task::spawn_blocking(move || {
-            let opts = TerminalOptions { command: command.as_deref(), title: Some(&title), origin: TerminalOrigin::Remote, bypass };
+            let opts = TerminalOptions { command: command2.as_deref(), title: Some(&title2), origin: TerminalOrigin::Remote, bypass };
             t.create_with(&app, &id2, std::path::Path::new(&root), cols, rows, opts)
         })
         .await
         .map_err(internal)?
         .map_err(internal)?;
-        terms.info(&id).ok_or_else(|| AppError::new("not_found", "the terminal exited at once"))
+        let info = terms.info(&id).ok_or_else(|| AppError::new("not_found", "the terminal exited at once"))?;
+        // The same PTY becomes a tab on the desktop, so what the phone types
+        // (and the agent's answer) shows there too.
+        let _ = self.app.emit(
+            EVENT_REMOTE_TERMINAL,
+            json!({
+                "terminal_id": id,
+                "workspace_id": Self::str_param(params, "workspace_id")?,
+                "title": title,
+                "command": command,
+                "agent_id": agent_id,
+                "bypass": bypass,
+            }),
+        );
+        Ok(info)
     }
 
     /// §6.9: agent CLI presets, launching one, and their usage.
@@ -1181,7 +1202,7 @@ impl RemoteController {
                     params.get(key).and_then(|v| v.as_u64()).unwrap_or(def).clamp(lo, hi) as u16
                 };
                 let info = self
-                    .open_remote_terminal(params, cli.name.clone(), Some(command), is_bypass, size("cols", 20, 400, 80), size("rows", 5, 200, 24))
+                    .open_remote_terminal(params, cli.name.clone(), Some(command), Some(&cli.id), is_bypass, size("cols", 20, 400, 80), size("rows", 5, 200, 24))
                     .await?;
                 let workspaces = self.db.list_workspaces().unwrap_or_default();
                 Ok(json!({ "terminal": self.terminal_json(&info, &workspaces) }))
@@ -1235,6 +1256,7 @@ impl RemoteController {
                 }
             }
             TerminalEvent::Resized { id, cols, rows } => {
+                let _ = self.app.emit(EVENT_TERMINAL_RESIZED, json!({ "terminal_id": id, "cols": cols, "rows": rows }));
                 let peers = self.attached_peers(id);
                 self.send_event_to(&peers, "terminal.resized", json!({ "terminal_id": id, "cols": cols, "rows": rows }));
             }

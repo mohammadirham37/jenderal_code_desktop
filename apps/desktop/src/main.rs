@@ -265,6 +265,7 @@ fn main() {
             commands::terminal_resize,
             commands::terminal_kill,
             commands::terminal_list,
+            commands::terminal_snapshot,
             commands::detect_agent_clis,
             commands::agent_usage,
             commands::list_skills,
