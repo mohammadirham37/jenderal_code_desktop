@@ -16,6 +16,7 @@ members = [
     "crates/tool-git",
     "crates/agent-cli",
     "crates/agent-runtime",
+    "crates/remote",
     "tests/e2e",
 ]
 
@@ -41,6 +42,7 @@ jcode-tool-mcp = { path = "crates/tool-mcp" }
 jcode-tool-git = { path = "crates/tool-git" }
 jcode-agent-cli = { path = "crates/agent-cli" }
 jcode-agent-runtime = { path = "crates/agent-runtime" }
+jcode-remote = { path = "crates/remote" }
 
 # External dependencies
 anyhow = "1"

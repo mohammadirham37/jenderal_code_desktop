@@ -880,7 +880,16 @@ pub fn get_settings(state: State<'_, AppState>) -> CmdResult<AppSettings> {
 
 #[tauri::command]
 pub fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> CmdResult<()> {
-    state.db.save_settings(&settings).map_err(err)
+    let before = state.db.get_settings().unwrap_or_default();
+    state.db.save_settings(&settings).map_err(err)?;
+    if before.remote_enabled != settings.remote_enabled {
+        let remote = state.remote.clone();
+        tauri::async_runtime::spawn(async move { remote.apply_settings().await });
+    }
+    if before.remote_allow_full_access != settings.remote_allow_full_access {
+        state.remote.capabilities_changed();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -955,18 +964,25 @@ pub async fn terminal_create(
     cols: Option<u16>,
     rows: Option<u16>,
     command: Option<String>,
+    title: Option<String>,
+    bypass: Option<bool>,
 ) -> CmdResult<()> {
     let cwd = state.active_root().unwrap_or_else(|_| PathBuf::from("."));
     let terminals = state.terminals.clone();
     blocking(move || {
         terminals
-            .create(
+            .create_with(
                 &app,
                 &id,
                 &cwd,
                 cols.unwrap_or(80),
                 rows.unwrap_or(24),
-                command.as_deref(),
+                crate::terminal::TerminalOptions {
+                    command: command.as_deref(),
+                    title: title.as_deref(),
+                    origin: crate::terminal::TerminalOrigin::Desktop,
+                    bypass: bypass.unwrap_or(false),
+                },
             )
             .map_err(err)
     })

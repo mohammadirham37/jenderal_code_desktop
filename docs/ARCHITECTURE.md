@@ -107,6 +107,20 @@ editor (file yang sedang diedit tidak ditimpa).
 Penegakan ganda: tools tidak dikirim ke model (specs) **dan** ditolak saat
 eksekusi bila dipanggil (defense in depth).
 
+## Remote control (ponsel lewat relay)
+
+Spesifikasi lengkap: `docs/REMOTE_PROTOCOL.md`. Tiga bagian: desktop (repo ini), relay Go
+(`jenderalcode_backend`) dan app Flutter (`jenderalcode_mobile`). Keduanya di luar repo ini.
+
+- `crates/remote` (`jcode-remote`): kripto end-to-end (`crypto.rs`), tipe frame dan pesan
+  aplikasi (`protocol.rs`), klien HTTP/WebSocket relay dengan reconnect (`relay.rs`), dan
+  `PeerBook` yang hanya menerima pesan dari ponsel yang sudah dikonfirmasi.
+- `apps/desktop/src/remote.rs` (`RemoteController`): pairing QR + kode 6 digit, dispatch
+  request ponsel ke `AgentRuntime`/`Db`, dan `EventSink` untuk event sesi yang di-subscribe
+  ponsel. `sink::FanoutSink` mengirim event ke webview dan ke ponsel sekaligus.
+- Relay tidak dipercaya: ia hanya melihat ciphertext. Sesi full access (Yolo) tidak bisa
+  dikendalikan dari ponsel, dan approval dari ponsel tidak pernah menjadi grant permanen.
+
 ## Debugging tips
 
 - Log event: dengarkan topik `chat://*`, `terminal://*`, `fs://changed` dari

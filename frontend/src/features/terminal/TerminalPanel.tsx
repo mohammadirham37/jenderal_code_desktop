@@ -25,8 +25,9 @@ export function TerminalPanel() {
     const id = newTerminalId();
     try {
       ensureXterm(id, useApp.getState().settings.terminal_font_size);
-      await api.terminalCreate(id, 80, 24);
-      setTabs((t) => [...t, { id, title: `shell ${t.length + 1}` }]);
+      const title = `shell ${tabs.length + 1}`;
+      await api.terminalCreate(id, 80, 24, undefined, title);
+      setTabs((t) => [...t, { id, title }]);
       setActiveId(id);
     } catch (e) {
       disposeXterm(id);

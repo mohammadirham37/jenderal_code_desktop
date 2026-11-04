@@ -37,6 +37,18 @@ Dibangun sesuai *JenderalCode-Desktop-PRD.md* v1.0 (MVP).
 | **Zoom UI** | Zoom in/out dengan ⌘+/⌘− (Ctrl+/Ctrl− di Windows/Linux), reset ⌘0; level tersimpan dan dipulihkan saat aplikasi dibuka |
 | **Keamanan** | Permission engine (Safe/Balanced/Yolo), approval card, checkpoint restore, API key di OS keychain, proteksi path traversal & symlink escape, file sensitif (.env dsb.) minta persetujuan (kecuali mode Full access) |
 
+### Remote dari HP (JenderalCode Mobile)
+
+Kendalikan sesi dari HP Android: chat, approval, ganti agent/model/mode,
+Files, Editor, Changes, Git, Terminal, serta sesi agent CLI (Claude Code,
+Codex, OpenCode, Antigravity). Pesan terenkripsi end-to-end antara HP dan
+desktop; relay hanya meneruskan (`docs/REMOTE_PROTOCOL.md`).
+
+- Unduh app Android: <https://github.com/mohammadirham37/jenderalcode_mobile/releases/latest>
+- Di desktop: **Settings → Remote control** → nyalakan, lalu **Pair a phone** dan scan QR dari app.
+- Full access, terminal dan edit file/git dari HP baru aktif setelah
+  **Allow Full access & terminal from phone** dinyalakan di desktop.
+
 ### Provider yang didukung
 
 - **OpenAI-compatible** — OpenAI, DeepSeek, Mistral, xAI, Groq, gateway/proxy kustom.

@@ -233,6 +233,55 @@ impl EventSink for TauriEventSink {
     }
 }
 
+/// Sends every runtime event to the webview and to subscribed phones.
+pub struct FanoutSink {
+    pub tauri: TauriEventSink,
+    pub remote: Arc<crate::remote::RemoteController>,
+}
+
+#[async_trait]
+impl EventSink for FanoutSink {
+    async fn status(&self, session_id: &str, status: ChatStatus, detail: Option<String>) {
+        self.remote.status(session_id, status, detail.clone()).await;
+        self.tauri.status(session_id, status, detail).await;
+    }
+
+    async fn delta(&self, session_id: &str, message_id: &str, delta: &str) {
+        self.remote.delta(session_id, message_id, delta).await;
+        self.tauri.delta(session_id, message_id, delta).await;
+    }
+
+    async fn reasoning_delta(&self, session_id: &str, message_id: &str, delta: &str) {
+        self.remote.reasoning_delta(session_id, message_id, delta).await;
+        self.tauri.reasoning_delta(session_id, message_id, delta).await;
+    }
+
+    async fn message(&self, session_id: &str, message: &MessageRecord) {
+        self.remote.message(session_id, message).await;
+        self.tauri.message(session_id, message).await;
+    }
+
+    async fn tool_run(&self, session_id: &str, run: &ToolRunRecord) {
+        self.remote.tool_run(session_id, run).await;
+        self.tauri.tool_run(session_id, run).await;
+    }
+
+    async fn approval(&self, session_id: &str, approval: &ApprovalRecord) {
+        self.remote.approval(session_id, approval).await;
+        self.tauri.approval(session_id, approval).await;
+    }
+
+    async fn usage(&self, session_id: &str, usage: TokenUsage, cost_estimate: Option<f64>) {
+        self.remote.usage(session_id, usage, cost_estimate).await;
+        self.tauri.usage(session_id, usage, cost_estimate).await;
+    }
+
+    async fn error(&self, session_id: &str, error: &str) {
+        self.remote.error(session_id, error).await;
+        self.tauri.error(session_id, error).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

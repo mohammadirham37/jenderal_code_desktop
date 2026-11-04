@@ -23,6 +23,7 @@ jcode-tool-git = { workspace = true }
 jcode-agent-runtime = { workspace = true }
 jcode-tool-mcp = { workspace = true }
 jcode-agent-cli = { workspace = true }
+jcode-remote = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
@@ -39,6 +40,7 @@ tauri-plugin-updater = { workspace = true }
 tauri-plugin-process = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 tempfile = "3"

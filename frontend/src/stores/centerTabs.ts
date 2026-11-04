@@ -55,7 +55,7 @@ const newTabId = () => `center-${Date.now()}-${Math.random().toString(36).slice(
 
 async function spawn(tab: CenterTab, command = tab.command) {
   (await registry()).ensureXterm(tab.id, useApp.getState().settings.terminal_font_size);
-  await api.terminalCreate(tab.id, 80, 24, command);
+  await api.terminalCreate(tab.id, 80, 24, command, tab.title, !!tab.bypass);
 }
 
 let exitListening = false;

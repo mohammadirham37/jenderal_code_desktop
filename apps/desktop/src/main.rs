@@ -5,6 +5,8 @@ mod agent_usage;
 mod browser;
 mod commands;
 mod quit;
+mod remote;
+mod remote_ops;
 mod sink;
 mod state;
 mod terminal;
@@ -120,13 +122,20 @@ fn main() {
                 ),
             );
 
-            let sink = Arc::new(sink::TauriEventSink::new(handle.clone()));
+            let remote = remote::RemoteController::new(handle.clone(), db.clone(), creds.clone());
+            let sink = Arc::new(sink::FanoutSink {
+                tauri: sink::TauriEventSink::new(handle.clone()),
+                remote: remote.clone(),
+            });
             let runtime = Arc::new(jcode_agent_runtime::AgentRuntime::new(
                 db.clone(),
                 creds.clone(),
                 sink,
                 data_dir.join("checkpoints"),
             ));
+            remote.set_runtime(runtime.clone());
+            let terminals = terminal::TerminalManager::default();
+            remote.set_terminals(terminals.clone());
 
             // Seed built-in profiles + mock provider and apply retention.
             tauri::async_runtime::block_on(jcode_agent_runtime::seed_defaults(&db))
@@ -149,10 +158,13 @@ fn main() {
                 db,
                 creds,
                 runtime,
-                terminals: terminal::TerminalManager::default(),
+                terminals,
                 active_workspace: RwLock::new(None),
                 data_dir,
+                remote: remote.clone(),
             });
+            // Reconnect to the relay when remote control was left on.
+            tauri::async_runtime::spawn(async move { remote.apply_settings().await });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -197,6 +209,16 @@ fn main() {
             commands::get_session_approvals,
             commands::get_session_detail,
             commands::send_message,
+            // Remote control (phone via relay)
+            remote::remote_status,
+            remote::remote_mobile_download,
+            remote::remote_open_mobile_download,
+            remote::remote_apply_settings,
+            remote::remote_start_pairing,
+            remote::remote_confirm_pairing,
+            remote::remote_cancel_pairing,
+            remote::remote_revoke_device,
+            remote::remote_forget_desktop,
             commands::steer_message,
             commands::cancel_generation,
             commands::decide_approval,

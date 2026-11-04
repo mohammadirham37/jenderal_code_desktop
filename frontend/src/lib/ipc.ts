@@ -205,6 +205,49 @@ export interface AppSettings {
   disabled_mcp_servers: string[];
   /** Projects whose `.mcp.json` the user allowed to run. */
   mcp_trusted_projects: { root: string; fingerprint: string }[];
+  /** Remote control from a paired phone (docs/REMOTE_PROTOCOL.md). */
+  remote_enabled: boolean;
+  /** Paired phones may use full access, terminals and file/git writes. */
+  remote_allow_full_access: boolean;
+}
+
+/** A phone paired for remote control (Rust `remote::RemoteDevice`). */
+export interface RemoteDevice {
+  device_id: string;
+  name: string;
+  user_email: string;
+  created_at: number;
+  last_seen?: number | null;
+  online: boolean;
+}
+
+export type RemoteState = "off" | "no_relay" | "unpaired" | "connecting" | "online" | "offline" | "stopped";
+
+export interface RemoteStatus {
+  enabled: boolean;
+  relay_url: string;
+  state: RemoteState;
+  error?: string | null;
+  desktop_name: string;
+  devices: RemoteDevice[];
+  allow_full_access: boolean;
+}
+
+export interface RemotePairingStarted {
+  pairing_id: string;
+  /** SVG markup of the QR code. */
+  qr_svg: string;
+  expires_at: number;
+}
+
+export interface RemotePairingEvent {
+  pairing_id: string;
+  state: "approved" | "expired" | "error";
+  /** 6-digit code to compare with the phone. */
+  sas?: string | null;
+  mobile_name?: string | null;
+  user_email?: string | null;
+  error?: string | null;
 }
 
 /** An MCP server config (Rust `jcode_tool_mcp::ServerConfig`). */
@@ -555,6 +598,20 @@ export const api = {
   getSessionUsage: (sessionId: string) => invoke<SessionUsage>("get_session_usage", { sessionId }),
   getSettings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
+
+  // Remote control
+  remoteStatus: () => invoke<RemoteStatus>("remote_status"),
+  /** Download page of the Android app, with a QR code to scan. */
+  remoteMobileDownload: () => invoke<{ url: string; qr_svg: string }>("remote_mobile_download"),
+  /** Open that page in the system browser (fixed URL). */
+  remoteOpenMobileDownload: () => invoke<void>("remote_open_mobile_download"),
+  remoteApplySettings: () => invoke<RemoteStatus>("remote_apply_settings"),
+  remoteStartPairing: () => invoke<RemotePairingStarted>("remote_start_pairing"),
+  remoteConfirmPairing: (pairingId: string, accept: boolean) =>
+    invoke<RemoteStatus>("remote_confirm_pairing", { pairingId, accept }),
+  remoteCancelPairing: () => invoke<void>("remote_cancel_pairing"),
+  remoteRevokeDevice: (deviceId: string) => invoke<RemoteStatus>("remote_revoke_device", { deviceId }),
+  remoteForgetDesktop: () => invoke<RemoteStatus>("remote_forget_desktop"),
   applyRetention: (days: number) => invoke<number>("apply_retention", { days }),
   clearHistory: () => invoke<number>("clear_history"),
   exportHistory: (path: string) => invoke<string>("export_history", { path }),
@@ -570,8 +627,16 @@ export const api = {
   browserClose: (id: string) => invoke<void>("browser_close", { id }),
 
   // Terminals
-  terminalCreate: (id: string, cols?: number, rows?: number, command?: string) =>
-    invoke<void>("terminal_create", { id, cols: cols ?? null, rows: rows ?? null, command: command ?? null }),
+  /** `title` is the tab label, shown to paired phones. */
+  terminalCreate: (id: string, cols?: number, rows?: number, command?: string, title?: string, bypass?: boolean) =>
+    invoke<void>("terminal_create", {
+      id,
+      cols: cols ?? null,
+      rows: rows ?? null,
+      command: command ?? null,
+      title: title ?? null,
+      bypass: bypass ?? null,
+    }),
   terminalWrite: (id: string, data: string) => invoke<void>("terminal_write", { id, data }),
   terminalResize: (id: string, cols: number, rows: number) =>
     invoke<void>("terminal_resize", { id, cols, rows }),
@@ -627,4 +692,11 @@ export const events = {
     listen<TerminalExitEvent>("terminal://exit", (ev) => cb(ev.payload)),
   fsChanged: (cb: (e: FsChangedEvent) => void): Promise<UnlistenFn> =>
     listen<FsChangedEvent>("fs://changed", (ev) => cb(ev.payload)),
+  remoteStatus: (cb: (e: RemoteStatus) => void): Promise<UnlistenFn> =>
+    listen<RemoteStatus>("remote://status", (ev) => cb(ev.payload)),
+  remotePairing: (cb: (e: RemotePairingEvent) => void): Promise<UnlistenFn> =>
+    listen<RemotePairingEvent>("remote://pairing", (ev) => cb(ev.payload)),
+  /** A session was created from the phone. */
+  remoteSessions: (cb: (e: { workspace_id: string }) => void): Promise<UnlistenFn> =>
+    listen<{ workspace_id: string }>("remote://sessions", (ev) => cb(ev.payload)),
 };

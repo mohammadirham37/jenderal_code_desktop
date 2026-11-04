@@ -88,6 +88,8 @@ export const useApp = create<AppState>((set, get) => ({
     disabled_skills: [],
     disabled_mcp_servers: [],
     mcp_trusted_projects: [],
+    remote_enabled: false,
+    remote_allow_full_access: false,
   },
   paletteOpen: false,
   quickOpen: false,

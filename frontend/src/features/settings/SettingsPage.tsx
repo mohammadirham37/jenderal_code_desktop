@@ -12,7 +12,7 @@ import {
   Palette,
   ShieldCheck,
   BookOpen,
-  Trash2, Plug, ArrowUpCircle } from "lucide-react";
+  Trash2, Plug, ArrowUpCircle, Smartphone } from "lucide-react";
 import { api, type UsageSummary } from "@/lib/ipc";
 import { useApp } from "@/stores/app";
 import { Button, Field, inputClass } from "@/components/ui";
@@ -21,6 +21,7 @@ import { AgentCliSettings } from "./AgentCliSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { McpSettings } from "./McpSettings";
 import { UpdateSettings } from "./UpdateSettings";
+import { RemoteSettings } from "./RemoteSettings";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { confirmAction } from "@/lib/confirm";
 
@@ -93,6 +94,19 @@ export function SettingsPage() {
               <ArrowUpCircle size={13} /> Updates
             </h2>
             <UpdateSettings />
+          </section>
+
+          {/* Remote control */}
+          <section id="remote">
+            <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              <Smartphone size={13} /> Remote control
+            </h2>
+            <p className="mb-3 text-[11px] text-neutral-500">
+              Chat with your sessions and answer approvals from your phone, through a relay server. Messages are
+              end-to-end encrypted between this desktop and the phones you pair here; the relay only forwards them.
+              Approvals from the phone cover one action at a time, and sessions with full access stay desktop-only.
+            </p>
+            <RemoteSettings />
           </section>
 
           {/* Usage */}

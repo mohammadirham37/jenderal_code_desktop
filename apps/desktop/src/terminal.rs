@@ -10,10 +10,71 @@ use jcode_common::{TerminalDataEvent, TerminalExitEvent, EVENT_TERMINAL_DATA, EV
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tauri::{AppHandle, Emitter};
+
+/// Recent output kept per terminal, so a phone attaching later sees context.
+pub const SCROLLBACK_BYTES: usize = 128 * 1024;
+
+/// Who opened a terminal: a desktop tab, or a paired phone (remote control).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalOrigin {
+    Desktop,
+    Remote,
+}
+
+impl TerminalOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TerminalOrigin::Desktop => "desktop",
+            TerminalOrigin::Remote => "remote",
+        }
+    }
+}
+
+/// What a running terminal is, for the remote terminal list.
+#[derive(Debug, Clone)]
+pub struct TerminalInfo {
+    pub id: String,
+    pub title: String,
+    /// Agent CLI tab (runs a command) rather than a plain shell.
+    pub agent: bool,
+    pub origin: TerminalOrigin,
+    /// Agent CLI started with its bypass-permissions flags.
+    pub bypass: bool,
+    pub cwd: PathBuf,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Output and lifecycle of terminals, for observers other than the webview.
+#[derive(Debug, Clone)]
+pub enum TerminalEvent {
+    Data { id: String, data: String },
+    Exit { id: String, code: Option<i32> },
+    Resized { id: String, cols: u16, rows: u16 },
+}
+
+type Observer = Arc<dyn Fn(&TerminalEvent) + Send + Sync>;
+
+/// Text ring buffer cut at char boundaries.
+#[derive(Default)]
+struct Scrollback(String);
+
+impl Scrollback {
+    fn push(&mut self, data: &str) {
+        self.0.push_str(data);
+        if self.0.len() > SCROLLBACK_BYTES + SCROLLBACK_BYTES / 4 {
+            let mut cut = self.0.len() - SCROLLBACK_BYTES;
+            while !self.0.is_char_boundary(cut) {
+                cut += 1;
+            }
+            self.0.drain(..cut);
+        }
+    }
+}
 
 struct PtyHandle {
     writer: Box<dyn Write + Send>,
@@ -22,6 +83,8 @@ struct PtyHandle {
     /// Distinguishes successive terminals reusing the same id, so a stale
     /// reader thread never removes its replacement.
     generation: u64,
+    info: TerminalInfo,
+    scrollback: Arc<Mutex<Scrollback>>,
 }
 
 type HandleMap = Arc<Mutex<HashMap<String, PtyHandle>>>;
@@ -32,6 +95,16 @@ type HandleMap = Arc<Mutex<HashMap<String, PtyHandle>>>;
 pub struct TerminalManager {
     handles: HandleMap,
     next_generation: Arc<AtomicU64>,
+    observer: Arc<RwLock<Option<Observer>>>,
+}
+
+/// Options beyond the PTY basics.
+pub struct TerminalOptions<'a> {
+    pub command: Option<&'a str>,
+    /// Tab label shown to phones (e.g. "shell 2", "Claude Code").
+    pub title: Option<&'a str>,
+    pub origin: TerminalOrigin,
+    pub bypass: bool,
 }
 
 fn lock(map: &HandleMap) -> std::sync::MutexGuard<'_, HashMap<String, PtyHandle>> {
@@ -98,17 +171,31 @@ pub(crate) fn which(prog: &str) -> Option<String> {
 }
 
 impl TerminalManager {
-    /// Spawn a new terminal. `id` is chosen by the frontend; `command`, when
-    /// set, runs instead of an interactive shell (agent CLI tabs).
-    pub fn create(
+    /// Receive every terminal's output, exit and resize (remote control).
+    pub fn set_observer(&self, f: impl Fn(&TerminalEvent) + Send + Sync + 'static) {
+        *self.observer.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(f));
+    }
+
+    fn notify(observer: &RwLock<Option<Observer>>, ev: TerminalEvent) {
+        let f = observer.read().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(f) = f {
+            f(&ev);
+        }
+    }
+
+    /// Spawn a new terminal. `id` is chosen by the frontend (or the remote
+    /// controller); `opts.command`, when set, runs instead of an interactive
+    /// shell (agent CLI tabs).
+    pub fn create_with(
         &self,
         app: &AppHandle,
         id: &str,
         cwd: &Path,
         cols: u16,
         rows: u16,
-        command: Option<&str>,
+        opts: TerminalOptions<'_>,
     ) -> Result<()> {
+        let command = opts.command;
         {
             let mut handles = lock(&self.handles);
             if let Some(h) = handles.get_mut(id) {
@@ -159,6 +246,14 @@ impl TerminalManager {
         let writer = pair.master.take_writer().context("taking pty writer")?;
 
         let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
+        let command = command.map(str::trim).filter(|c| !c.is_empty());
+        let title = opts
+            .title
+            .map(|t| t.trim().chars().take(80).collect::<String>())
+            .filter(|t| !t.is_empty())
+            .or_else(|| command.and_then(|c| c.split_whitespace().next()).map(str::to_string))
+            .unwrap_or_else(|| "shell".to_string());
+        let scrollback = Arc::new(Mutex::new(Scrollback::default()));
         // Insert before the reader starts so its EOF cleanup always finds it.
         lock(&self.handles).insert(
             id.to_string(),
@@ -167,8 +262,20 @@ impl TerminalManager {
                 master: pair.master,
                 child,
                 generation,
+                info: TerminalInfo {
+                    id: id.to_string(),
+                    title,
+                    agent: command.is_some(),
+                    origin: opts.origin,
+                    bypass: opts.bypass && command.is_some(),
+                    cwd: cwd.to_path_buf(),
+                    cols,
+                    rows,
+                },
+                scrollback: scrollback.clone(),
             },
         );
+        let observer = self.observer.clone();
 
         // Reader thread: forward PTY output; EOF means the shell exited.
         // UTF-8 sequences can be split across read() chunks — keep the
@@ -204,6 +311,8 @@ impl TerminalManager {
                             }
                         };
                         if !data.is_empty() {
+                            scrollback.lock().unwrap_or_else(|e| e.into_inner()).push(&data);
+                            Self::notify(&observer, TerminalEvent::Data { id: term_id.clone(), data: data.clone() });
                             let _ = app_reader.emit(
                                 EVENT_TERMINAL_DATA,
                                 TerminalDataEvent {
@@ -228,6 +337,7 @@ impl TerminalManager {
             let code = removed.and_then(|mut h| {
                 h.child.wait().ok().map(|s| s.exit_code() as i32)
             });
+            Self::notify(&observer, TerminalEvent::Exit { id: term_id.clone(), code });
             let _ = app_reader.emit(
                 EVENT_TERMINAL_EXIT,
                 TerminalExitEvent {
@@ -254,10 +364,13 @@ impl TerminalManager {
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
-        let handles = lock(&self.handles);
+        let mut handles = lock(&self.handles);
         let handle = handles
-            .get(id)
+            .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("terminal {id} not found"))?;
+        let changed = handle.info.cols != cols || handle.info.rows != rows;
+        handle.info.cols = cols;
+        handle.info.rows = rows;
         handle
             .master
             .resize(PtySize {
@@ -267,7 +380,27 @@ impl TerminalManager {
                 pixel_height: 0,
             })
             .context("resizing pty")?;
+        drop(handles);
+        if changed {
+            Self::notify(&self.observer, TerminalEvent::Resized { id: id.to_string(), cols, rows });
+        }
         Ok(())
+    }
+
+    /// Running terminals.
+    pub fn infos(&self) -> Vec<TerminalInfo> {
+        lock(&self.handles).values().map(|h| h.info.clone()).collect()
+    }
+
+    pub fn info(&self, id: &str) -> Option<TerminalInfo> {
+        lock(&self.handles).get(id).map(|h| h.info.clone())
+    }
+
+    /// The recent output of a terminal (up to [`SCROLLBACK_BYTES`]).
+    pub fn scrollback(&self, id: &str) -> Option<String> {
+        let sb = lock(&self.handles).get(id).map(|h| h.scrollback.clone())?;
+        let text = sb.lock().unwrap_or_else(|e| e.into_inner()).0.clone();
+        Some(text)
     }
 
     pub fn kill(&self, id: &str) -> Result<()> {
@@ -319,6 +452,18 @@ mod tests {
         let a = argv(&build_command(Some("goose session")));
         assert_eq!(a[0], user_shell());
         assert_eq!(&a[1..], [shell_args(), vec!["-c", "goose session"]].concat());
+    }
+
+    #[test]
+    fn scrollback_keeps_the_newest_output_at_char_boundaries() {
+        let mut sb = Scrollback::default();
+        for _ in 0..(SCROLLBACK_BYTES / 4) {
+            sb.push("é ab"); // 5 bytes with a 2-byte char
+        }
+        assert!(sb.0.len() <= SCROLLBACK_BYTES + SCROLLBACK_BYTES / 4);
+        assert!(sb.0.len() >= SCROLLBACK_BYTES);
+        sb.push("END");
+        assert!(sb.0.ends_with("END"));
     }
 
     #[test]

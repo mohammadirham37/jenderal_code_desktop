@@ -391,6 +391,19 @@ pub struct ApprovalRecord {
     pub decided_at: Option<i64>,
 }
 
+/// A phone paired with this desktop for remote control.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemotePeer {
+    pub device_id: String,
+    pub name: String,
+    /// X25519 public key, base64url without padding.
+    pub public_key: String,
+    pub user_email: String,
+    pub created_at: i64,
+    #[serde(default)]
+    pub last_seen: Option<i64>,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
     #[serde(default)]
@@ -649,6 +662,15 @@ pub struct AppSettings {
     /// file's content: an edited file needs approval again.
     #[serde(default)]
     pub mcp_trusted_projects: Vec<McpProjectTrust>,
+    /// Remote control from a paired phone (docs/REMOTE_PROTOCOL.md). Off by
+    /// default; turning it off closes the relay connection.
+    #[serde(default)]
+    pub remote_enabled: bool,
+    /// Let paired phones switch sessions to full access, use terminals and
+    /// edit files / run git writes (docs/REMOTE_PROTOCOL.md §6.5). Off by
+    /// default.
+    #[serde(default)]
+    pub remote_allow_full_access: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -703,6 +725,8 @@ impl Default for AppSettings {
             disabled_skills: Vec::new(),
             disabled_mcp_servers: Vec::new(),
             mcp_trusted_projects: Vec::new(),
+            remote_enabled: false,
+            remote_allow_full_access: false,
         }
     }
 }

@@ -17,6 +17,7 @@ import { useProviders } from "@/stores/providers";
 import { useEditor } from "@/stores/editor";
 import { CommandPalette } from "@/components/CommandPalette";
 import { QuickOpen } from "@/components/QuickOpen";
+import { startRemoteSync } from "@/stores/remote";
 import { Welcome } from "@/features/welcome/Welcome";
 import { WorkspacePage } from "@/features/workspace/WorkspacePage";
 import { Spinner } from "@/components/ui";
@@ -71,6 +72,7 @@ function AppShell() {
   }, [init, chatInit, loadProviders]);
 
   useEffect(() => startUpdateChecks(), []);
+  useEffect(() => startRemoteSync(), []);
 
   // Global save shortcut.
   useEffect(() => {

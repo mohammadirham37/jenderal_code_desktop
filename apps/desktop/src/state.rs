@@ -15,6 +15,7 @@ pub struct AppState {
     pub terminals: TerminalManager,
     pub active_workspace: RwLock<Option<WorkspaceInfo>>,
     pub data_dir: std::path::PathBuf,
+    pub remote: Arc<crate::remote::RemoteController>,
 }
 
 impl AppState {

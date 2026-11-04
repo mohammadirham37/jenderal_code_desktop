@@ -1,6 +1,7 @@
 /** Workspace shell: title bar with the Code/Chat layout switch, then either
  *  the IDE layout (explorer | editor + bottom panel | chat) or the
  *  chat-first layout. */
+import { RemoteBadge } from "@/components/RemoteBadge";
 import { useState } from "react";
 import { Code2, GitBranch, Globe, MessagesSquare, PanelBottom, PanelBottomClose, Terminal as TerminalIcon } from "lucide-react";
 import { BrowserPanel } from "@/features/browser/BrowserPanel";
@@ -31,6 +32,7 @@ export function WorkspacePage() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <RemoteBadge />
           <UpdateButton />
           <LayoutSwitch />
         </div>

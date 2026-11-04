@@ -25,6 +25,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("012_message_images", include_str!("../migrations/012_message_images.sql")),
     ("013_agent_resume_args", include_str!("../migrations/013_agent_resume_args.sql")),
     ("014_workspace_hidden", include_str!("../migrations/014_workspace_hidden.sql")),
+    ("015_remote_peers", include_str!("../migrations/015_remote_peers.sql")),
 ];
 
 pub struct Db {
@@ -959,6 +960,66 @@ impl Db {
     // Settings, retention, export
     // ------------------------------------------------------------------
 
+    // ---------------------------------------------------------------------
+    // Remote peers (phones paired for remote control)
+    // ---------------------------------------------------------------------
+
+    pub fn list_remote_peers(&self) -> Result<Vec<RemotePeer>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT device_id, name, public_key, user_email, created_at, last_seen
+                 FROM remote_peers ORDER BY created_at",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(RemotePeer {
+                    device_id: r.get(0)?,
+                    name: r.get(1)?,
+                    public_key: r.get(2)?,
+                    user_email: r.get(3)?,
+                    created_at: r.get(4)?,
+                    last_seen: r.get(5)?,
+                })
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    pub fn upsert_remote_peer(&self, p: &RemotePeer) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO remote_peers(device_id, name, public_key, user_email, created_at, last_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(device_id) DO UPDATE SET name = ?2, public_key = ?3, user_email = ?4",
+                params![p.device_id, p.name, p.public_key, p.user_email, p.created_at, p.last_seen],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_remote_peer(&self, device_id: &str) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute("DELETE FROM remote_peers WHERE device_id = ?1", params![device_id])?;
+            Ok(())
+        })
+    }
+
+    pub fn clear_remote_peers(&self) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute("DELETE FROM remote_peers", [])?;
+            Ok(())
+        })
+    }
+
+    pub fn touch_remote_peer(&self, device_id: &str, at: i64) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE remote_peers SET last_seen = ?2 WHERE device_id = ?1",
+                params![device_id, at],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn get_settings(&self) -> Result<AppSettings> {
         self.with_conn(|conn| {
             let json: Option<String> = conn
@@ -1174,6 +1235,29 @@ mod tests {
 
     fn db() -> Db {
         Db::open_memory().expect("memory db")
+    }
+
+    #[test]
+    fn remote_peers_round_trip() {
+        let d = db();
+        let mut p = RemotePeer {
+            device_id: "m1".into(),
+            name: "Pixel".into(),
+            public_key: "pk".into(),
+            user_email: "a@example.com".into(),
+            created_at: 1,
+            last_seen: None,
+        };
+        d.upsert_remote_peer(&p).unwrap();
+        p.name = "Pixel 9".into();
+        d.upsert_remote_peer(&p).unwrap();
+        d.touch_remote_peer("m1", 5).unwrap();
+        let all = d.list_remote_peers().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].name, "Pixel 9");
+        assert_eq!(all[0].last_seen, Some(5));
+        d.delete_remote_peer("m1").unwrap();
+        assert!(d.list_remote_peers().unwrap().is_empty());
     }
 
     #[test]
