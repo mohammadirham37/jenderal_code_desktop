@@ -45,8 +45,10 @@ pub fn report(home: &Path) -> AgentUsageReport {
 /// Run an `agy` command line through the login shell (agy usually lives in
 /// `~/.local/bin`), without letting it self-update.
 fn run_agy(home: &Path, command: &str) -> Option<String> {
-    let mut child = Command::new(crate::terminal::user_shell())
-        .args(["-l", "-i", "-c", command])
+    let shell = crate::terminal::user_shell();
+    let mut child = Command::new(&shell)
+        .args(jcode_tool_terminal::user_path::interactive_shell_args(&shell))
+        .args(["-c", command])
         .current_dir(home)
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
         .stdin(Stdio::null())

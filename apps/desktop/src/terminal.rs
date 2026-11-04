@@ -56,10 +56,11 @@ fn default_shell() -> CommandBuilder {
         }
         return CommandBuilder::new("cmd.exe");
     }
-    let mut cmd = CommandBuilder::new(user_shell());
-    // Login + interactive, like Terminal.app: loads the user's profile.
-    cmd.arg("-l");
-    cmd.arg("-i");
+    let shell = user_shell();
+    // Started like the OS terminal (login + interactive on macOS, `bash -i`
+    // on Linux), so the user's profile and rc files set the same PATH.
+    let mut cmd = CommandBuilder::new(&shell);
+    cmd.args(jcode_tool_terminal::user_path::interactive_shell_args(&shell));
     cmd
 }
 
@@ -306,19 +307,23 @@ mod tests {
     fn plain_terminal_is_interactive_login_shell() {
         let a = argv(&build_command(None));
         assert_eq!(a[0], user_shell());
-        assert_eq!(&a[1..], ["-l", "-i"]);
+        assert_eq!(&a[1..], shell_args());
+    }
+
+    fn shell_args() -> Vec<&'static str> {
+        jcode_tool_terminal::user_path::interactive_shell_args(&user_shell()).to_vec()
     }
 
     #[test]
     fn agent_command_runs_through_login_shell() {
         let a = argv(&build_command(Some("goose session")));
         assert_eq!(a[0], user_shell());
-        assert_eq!(&a[1..], ["-l", "-i", "-c", "goose session"]);
+        assert_eq!(&a[1..], [shell_args(), vec!["-c", "goose session"]].concat());
     }
 
     #[test]
     fn blank_command_is_a_plain_shell() {
         let a = argv(&build_command(Some("   ")));
-        assert_eq!(&a[1..], ["-l", "-i"]);
+        assert_eq!(&a[1..], shell_args());
     }
 }

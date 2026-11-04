@@ -14,6 +14,25 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 
 static USER_PATH: OnceLock<String> = OnceLock::new();
 
+/// Flags that start `shell` the way the OS terminal does, so it sees the
+/// same PATH: login + interactive (`-l -i`), except bash on Linux, which
+/// gets `-i` only. Terminal emulators there run a non-login bash, which reads
+/// `~/.bashrc` (where nvm, fnm, etc. add themselves); a login bash reads
+/// `~/.bash_profile` instead when it exists and then skips `~/.bashrc`. The
+/// desktop session has already applied `~/.profile`.
+pub fn interactive_shell_args(shell: &str) -> &'static [&'static str] {
+    shell_args_for(shell, cfg!(target_os = "linux"))
+}
+
+fn shell_args_for(shell: &str, linux: bool) -> &'static [&'static str] {
+    let name = shell.rsplit('/').next().unwrap_or(shell);
+    if linux && name == "bash" {
+        &["-i"]
+    } else {
+        &["-l", "-i"]
+    }
+}
+
 /// The resolved PATH, if [`init_from_login_shell`] has finished.
 pub fn user_path() -> Option<&'static str> {
     USER_PATH.get().map(String::as_str)
@@ -34,8 +53,9 @@ pub fn init_from_login_shell() {
 fn login_shell_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let script = format!("printf '{START}%s{END}' \"$PATH\"");
-    let mut child = Command::new(shell)
-        .args(["-l", "-i", "-c", &script])
+    let mut child = Command::new(&shell)
+        .args(interactive_shell_args(&shell))
+        .args(["-c", &script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -80,6 +100,14 @@ fn merge_paths(login: &str, current: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bash_on_linux_is_not_a_login_shell() {
+        assert_eq!(shell_args_for("/bin/bash", true), ["-i"]);
+        assert_eq!(shell_args_for("/usr/bin/zsh", true), ["-l", "-i"]);
+        assert_eq!(shell_args_for("/bin/bash", false), ["-l", "-i"]);
+        assert_eq!(shell_args_for("/bin/zsh", false), ["-l", "-i"]);
+    }
 
     #[test]
     fn parses_path_between_markers_ignoring_profile_noise() {

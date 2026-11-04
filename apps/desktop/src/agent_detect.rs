@@ -65,12 +65,13 @@ pub fn detect(commands: &[String]) -> Vec<bool> {
         .unwrap_or_else(|| vec![false; commands.len()])
 }
 
-/// Login *and* interactive, like the terminal tabs: many installers (nvm,
-/// opencode, bun, ...) add themselves to PATH in `~/.zshrc`, which a
-/// non-interactive login shell does not read.
+/// Interactive (and login, except bash on Linux), like the terminal tabs:
+/// many installers (nvm, opencode, bun, ...) add themselves to PATH in
+/// `~/.zshrc` / `~/.bashrc`, which a non-interactive shell does not read.
 fn shell_command(shell: &str, script: &str) -> Command {
     let mut cmd = Command::new(shell);
-    cmd.args(["-l", "-i", "-c", script]);
+    cmd.args(jcode_tool_terminal::user_path::interactive_shell_args(shell));
+    cmd.args(["-c", script]);
     cmd
 }
 
