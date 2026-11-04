@@ -11,8 +11,9 @@ use jcode_tool_git::GitRepo;
 use serde_json::{json, Value};
 use std::path::Path;
 
-const MAX_FILE_BYTES: usize = 1024 * 1024;
-const MAX_DIFF_BYTES: usize = 1024 * 1024;
+// Below the relay's 1 MiB frame once JSON-escaped, sealed and base64-encoded.
+const MAX_FILE_BYTES: usize = 512 * 1024;
+const MAX_DIFF_BYTES: usize = 512 * 1024;
 
 pub fn bad(msg: impl Into<String>) -> AppError {
     AppError::new("bad_request", msg)
@@ -205,7 +206,7 @@ pub fn dispatch(db: &Db, method: &str, params: &Value, can_edit: bool) -> Option
             check_not_sensitive(path)?;
             let content = ws.read_file(path).map_err(|e| bad(format!("{e:#}")))?;
             if content.len() > MAX_FILE_BYTES {
-                return Err(bad("file is larger than 1 MiB"));
+                return Err(bad("file is larger than 512 KiB"));
             }
             Ok(json!({ "path": path, "size": content.len(), "content": content }))
         })(),
@@ -215,7 +216,7 @@ pub fn dispatch(db: &Db, method: &str, params: &Value, can_edit: bool) -> Option
             check_not_sensitive(path)?;
             let content = params.get("content").and_then(|v| v.as_str()).ok_or_else(|| bad("missing content"))?;
             if content.len() > MAX_FILE_BYTES {
-                return Err(bad("content is larger than 1 MiB"));
+                return Err(bad("content is larger than 512 KiB"));
             }
             ws.write_file(path, content).map_err(|e| bad(format!("{e:#}")))?;
             Ok(json!({}))
@@ -312,8 +313,102 @@ pub fn dispatch(db: &Db, method: &str, params: &Value, can_edit: bool) -> Option
     Some(r)
 }
 
+/// Shorten every string in `v` longer than `max` bytes (at a char
+/// boundary), noting how much was cut.
+pub fn shorten_strings(v: &mut Value, max: usize) {
+    match v {
+        Value::String(s) if s.len() > max => {
+            let mut cut = max;
+            while !s.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            let dropped = s.len() - cut;
+            s.truncate(cut);
+            s.push_str(&format!("\n… [{dropped} more bytes on the desktop]"));
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| shorten_strings(x, max)),
+        Value::Object(o) => o.values_mut().for_each(|x| shorten_strings(x, max)),
+        _ => {}
+    }
+}
+
+fn json_len(v: &Value) -> usize {
+    serde_json::to_vec(v).map(|b| b.len()).unwrap_or(usize::MAX)
+}
+
+/// Make a `session.history` result fit in `budget` bytes of JSON: first
+/// shorten long strings (tool output, file contents in tool arguments) in
+/// messages and tool runs, then leave out the oldest messages and their tool
+/// runs. Sets `truncated: true` when anything was cut.
+pub fn fit_history(h: &mut Value, budget: usize) {
+    if json_len(h) <= budget {
+        return;
+    }
+    h["truncated"] = json!(true);
+    for max in [16 * 1024, 4 * 1024, 1024] {
+        for key in ["messages", "tool_runs"] {
+            shorten_strings(&mut h[key], max);
+        }
+        if json_len(h) <= budget {
+            return;
+        }
+    }
+    // Still too big: drop the oldest messages (and older tool runs).
+    loop {
+        let Some(msgs) = h["messages"].as_array_mut() else { return };
+        if msgs.is_empty() {
+            break;
+        }
+        let drop = (msgs.len() / 8).max(1);
+        msgs.drain(..drop);
+        let oldest = msgs.first().and_then(|m| m["created_at"].as_i64()).unwrap_or(i64::MAX);
+        if let Some(runs) = h["tool_runs"].as_array_mut() {
+            runs.retain(|r| r["created_at"].as_i64().unwrap_or(0) >= oldest);
+        }
+        if json_len(h) <= budget {
+            return;
+        }
+    }
+    if let Some(runs) = h["tool_runs"].as_array_mut() {
+        runs.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_is_shrunk_to_fit_the_relay() {
+        let big = "x".repeat(300 * 1024);
+        let msgs: Vec<Value> = (0..40)
+            .map(|i| json!({ "id": format!("m{i}"), "role": "tool", "content": big, "created_at": i }))
+            .collect();
+        let runs: Vec<Value> = (0..40)
+            .map(|i| json!({ "id": format!("r{i}"), "args": { "content": big }, "created_at": i }))
+            .collect();
+        let mut h = json!({ "session": {"id": "s"}, "messages": msgs, "tool_runs": runs, "approvals": [], "busy": false });
+        fit_history(&mut h, 700_000);
+        assert!(json_len(&h) <= 700_000);
+        assert_eq!(h["truncated"], json!(true));
+        // Long strings were shortened before any message was dropped.
+        assert_eq!(h["messages"].as_array().unwrap().len(), 40);
+        assert!(h["messages"][0]["content"].as_str().unwrap().contains("more bytes on the desktop"));
+
+        // A huge number of messages: the newest are kept.
+        let many: Vec<Value> = (0..20_000)
+            .map(|i| json!({ "id": format!("m{i}"), "role": "user", "content": "hello there", "created_at": i }))
+            .collect();
+        let mut h = json!({ "messages": many, "tool_runs": [] });
+        fit_history(&mut h, 200_000);
+        assert!(json_len(&h) <= 200_000);
+        let kept = h["messages"].as_array().unwrap();
+        assert_eq!(kept.last().unwrap()["id"], json!("m19999"));
+
+        // Small histories are untouched.
+        let mut h = json!({ "messages": [{"content": "hi"}], "tool_runs": [] });
+        fit_history(&mut h, 1000);
+        assert!(h.get("truncated").is_none());
+    }
+
     use super::*;
 
     fn db_with_project() -> (tempfile::TempDir, Db, String) {

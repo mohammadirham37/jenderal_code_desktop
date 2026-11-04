@@ -31,6 +31,10 @@ pub const EVENT_REMOTE_STATUS: &str = "remote://status";
 pub const EVENT_REMOTE_PAIRING: &str = "remote://pairing";
 /// A session was created from the phone: the session list should reload.
 pub const EVENT_REMOTE_SESSIONS: &str = "remote://sessions";
+/// JSON budget for `session.history`, below the relay's frame limit with
+/// room for the response envelope.
+const HISTORY_BUDGET_BYTES: usize = jcode_remote::relay::MAX_APP_JSON_BYTES - 16 * 1024;
+
 /// A phone opened a terminal: the desktop shows it as a tab of its project.
 pub const EVENT_REMOTE_TERMINAL: &str = "remote://terminal";
 /// A terminal's PTY size changed (desktop tabs of phone-opened terminals
@@ -524,8 +528,39 @@ impl RemoteController {
         let Ok(v) = serde_json::to_value(m) else { return };
         let inner = self.lock();
         let (Some(book), Some(link)) = (inner.book.as_ref(), inner.link.as_ref()) else { return };
-        if let Some(body) = book.seal(peer, &v, now_ms()) {
-            link.send(peer, body);
+        let Some(body) = book.seal(peer, &v, now_ms()) else { return };
+        if link.send(peer, body) {
+            return;
+        }
+        // Too large for the relay (it would close our connection): answer a
+        // request with an error instead; an oversize event is dropped.
+        match m {
+            AppMessage::Res { id, .. } => {
+                let err = AppMessage::err(
+                    id.clone(),
+                    AppError::new("too_large", "The answer is too large to send to the phone."),
+                );
+                if let Ok(v) = serde_json::to_value(&err) {
+                    if let Some(body) = book.seal(peer, &v, now_ms()) {
+                        link.send(peer, body);
+                    }
+                }
+                log::warn!("remote: response {id} too large for the relay, sent too_large");
+            }
+            AppMessage::Event { name, data } => {
+                // Long strings (tool output) shortened, then sent once more.
+                let mut data = data.clone();
+                crate::remote_ops::shorten_strings(&mut data, 4 * 1024);
+                let ev = AppMessage::Event { name: name.clone(), data };
+                let sent = serde_json::to_value(&ev)
+                    .ok()
+                    .and_then(|v| book.seal(peer, &v, now_ms()))
+                    .is_some_and(|body| link.send(peer, body));
+                if !sent {
+                    log::warn!("remote: event {name} too large for the relay, dropped");
+                }
+            }
+            AppMessage::Req { .. } => {}
         }
     }
 
@@ -736,13 +771,15 @@ impl RemoteController {
                         Ok((messages, db.list_tool_runs(&sid)?, db.list_approvals(&sid)?))
                     })
                     .await?;
-                Ok(json!({
+                let mut history = json!({
                     "session": session,
                     "messages": messages,
                     "tool_runs": tool_runs,
                     "approvals": approvals,
                     "busy": busy,
-                }))
+                });
+                crate::remote_ops::fit_history(&mut history, HISTORY_BUDGET_BYTES);
+                Ok(history)
             }
             "session.subscribe" => {
                 let sid = Self::str_param(&params, "session_id")?;

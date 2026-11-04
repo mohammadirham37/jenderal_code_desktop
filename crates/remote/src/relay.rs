@@ -242,13 +242,29 @@ pub struct Link {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// The relay closes a connection that sends a frame over 1 MiB
+/// (docs/REMOTE_PROTOCOL.md §3), so bodies stay below it with room for the
+/// envelope (`{"t":"msg","to":…,"id":…,"body":…}`).
+pub const MAX_BODY_BYTES: usize = (1 << 20) - 1024;
+
+/// Largest app message (JSON) that still seals into [`MAX_BODY_BYTES`]:
+/// base64 grows it by 4/3, plus the nonce, tag and the `ts`/`mid` fields.
+pub const MAX_APP_JSON_BYTES: usize = MAX_BODY_BYTES / 4 * 3 - 256;
+
 impl Link {
-    pub fn send(&self, to: &str, body: String) {
-        let _ = self.out.send(ClientFrame::Msg {
-            to: to.to_string(),
-            id: uuid::Uuid::new_v4().to_string(),
-            body,
-        });
+    /// Queue a message. Bodies over [`MAX_BODY_BYTES`] are refused (false):
+    /// the relay would drop the whole connection for them.
+    pub fn send(&self, to: &str, body: String) -> bool {
+        if body.len() > MAX_BODY_BYTES {
+            return false;
+        }
+        self.out
+            .send(ClientFrame::Msg {
+                to: to.to_string(),
+                id: uuid::Uuid::new_v4().to_string(),
+                body,
+            })
+            .is_ok()
     }
 }
 
