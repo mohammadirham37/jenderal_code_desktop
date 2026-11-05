@@ -147,6 +147,8 @@ pub struct RemoteController {
     terminals: OnceLock<TerminalManager>,
     /// Terminal output waiting to be sent (coalesced per terminal).
     term_out: Mutex<HashMap<String, String>>,
+    /// The phone's browser: fetches from localhost (§6.10).
+    http: crate::remote_http::HttpProxy,
     deltas: DeltaCoalescer,
     /// Serializes connect/disconnect so settings changes cannot race.
     reconnect_lock: tokio::sync::Mutex<()>,
@@ -211,6 +213,7 @@ impl RemoteController {
                 runtime: OnceLock::new(),
                 terminals: OnceLock::new(),
                 term_out: Mutex::new(HashMap::new()),
+                http: crate::remote_http::HttpProxy::new(),
                 inner: Mutex::new(Inner {
                     state: "off",
                     ..Default::default()
@@ -620,13 +623,30 @@ impl RemoteController {
 
     fn capabilities(&self) -> Value {
         let on = self.allow_full_access();
-        json!({ "full_access": on, "terminal": on, "edit": on })
+        json!({ "full_access": on, "terminal": on, "edit": on, "browser": on })
+    }
+
+    /// Pages open in the desktop's browser previews that the phone may load
+    /// (localhost only), for the phone browser's address suggestions.
+    fn browser_targets(&self) -> Vec<Value> {
+        use tauri::Manager;
+        let mut seen = std::collections::HashSet::new();
+        self.app
+            .webviews()
+            .into_iter()
+            .filter(|(label, _)| crate::browser::is_preview_label(label))
+            .filter_map(|(_, w)| w.url().ok())
+            .filter(|u| crate::remote_http::loopback_url(u.as_str()).is_ok())
+            .filter(|u| seen.insert(u.to_string()))
+            .map(|u| json!({ "url": u.to_string() }))
+            .collect()
     }
 
     /// The setting changed: tell every online phone, and when it was turned
     /// off, detach their terminals and close the ones they opened.
     pub fn capabilities_changed(&self) {
         if !self.allow_full_access() {
+            self.http.clear();
             self.lock().term_attach.clear();
             if let Some(t) = self.terminals.get() {
                 for info in t.infos().into_iter().filter(|i| i.origin == TerminalOrigin::Remote) {
@@ -748,6 +768,16 @@ impl RemoteController {
             }
             m if m.starts_with("terminal.") => self.handle_terminal(peer, m, &params).await,
             m if m.starts_with("agent_clis.") => self.handle_agent_clis(m, &params).await,
+            "http.request" | "http.read" | "browser.targets" => {
+                if !self.allow_full_access() {
+                    return Err(crate::remote_ops::not_allowed());
+                }
+                match method {
+                    "http.request" => self.http.request(&params).await,
+                    "http.read" => self.http.read(&params),
+                    _ => Ok(json!({ "targets": self.browser_targets() })),
+                }
+            }
             "workspaces.list" => {
                 let ws = self.db_call(|db| db.list_workspaces()).await?;
                 Ok(json!({ "workspaces": ws }))

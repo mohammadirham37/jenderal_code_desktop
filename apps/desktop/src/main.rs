@@ -7,6 +7,7 @@ mod commands;
 mod quit;
 mod remote;
 mod remote_ops;
+mod remote_http;
 mod sink;
 mod state;
 mod terminal;

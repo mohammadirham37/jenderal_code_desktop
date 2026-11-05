@@ -10,6 +10,7 @@ default-run = "jenderalcode-desktop"
 tauri-build = { workspace = true }
 
 [dependencies]
+url = "2"
 base64 = "0.22"
 jcode-common = { workspace = true }
 jcode-permissions = { workspace = true }
