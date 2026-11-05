@@ -20,6 +20,9 @@ import { toml as tomlMode } from "@codemirror/legacy-modes/mode/toml";
 import { shell as shellMode } from "@codemirror/legacy-modes/mode/shell";
 import { dockerFile as dockerMode } from "@codemirror/legacy-modes/mode/dockerfile";
 import { ruby as rubyMode } from "@codemirror/legacy-modes/mode/ruby";
+import { dart as dartMode, kotlin as kotlinMode, csharp as csharpMode, scala as scalaMode } from "@codemirror/legacy-modes/mode/clike";
+import { swift as swiftMode } from "@codemirror/legacy-modes/mode/swift";
+import { lua as luaMode } from "@codemirror/legacy-modes/mode/lua";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
 import { ChevronDown, X, Circle } from "lucide-react";
@@ -38,7 +41,8 @@ function keyOf(t: Tab): string {
 const LANGUAGES: string[] = [
   "typescript", "tsx", "javascript", "jsx", "rust", "python", "json",
   "markdown", "html", "css", "scss", "xml", "go", "java", "cpp", "c",
-  "sql", "php", "ruby", "yaml", "toml", "bash", "dockerfile", "text",
+  "sql", "php", "ruby", "yaml", "toml", "bash", "dockerfile", "dart", "kotlin",
+  "swift", "csharp", "scala", "lua", "text",
 ];
 
 function langExtension(lang: string): import("@codemirror/state").Extension[] {
@@ -89,6 +93,18 @@ function langExtension(lang: string): import("@codemirror/state").Extension[] {
       return [StreamLanguage.define(shellMode)];
     case "dockerfile":
       return [StreamLanguage.define(dockerMode)];
+    case "dart":
+      return [StreamLanguage.define(dartMode)];
+    case "kotlin":
+      return [StreamLanguage.define(kotlinMode)];
+    case "swift":
+      return [StreamLanguage.define(swiftMode)];
+    case "csharp":
+      return [StreamLanguage.define(csharpMode)];
+    case "scala":
+      return [StreamLanguage.define(scalaMode)];
+    case "lua":
+      return [StreamLanguage.define(luaMode)];
     default:
       return [];
   }
