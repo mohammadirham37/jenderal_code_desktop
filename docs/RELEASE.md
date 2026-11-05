@@ -58,7 +58,11 @@ cocok dengan `pubkey` di `tauri.conf.json`.
   Berikan lewat environment sesi itu saja; jangan tulis ke file di repo
   atau ke shell history di host bersama.
 - Bundle update per OS: macOS `JenderalCode_X.Y.Z_universal.app.tar.gz`,
-  Linux `.AppImage` (paket `.deb`/`.rpm` tidak di-update otomatis),
+  Linux `.AppImage`, `.deb` dan `.rpm` (masing-masing di-update dengan paket
+  sejenis: updater mencari `linux-x86_64-deb` / `-rpm` / `-appimage` dulu,
+  lalu `linux-x86_64` yang berisi AppImage; app dari `.deb` yang menerima
+  AppImage gagal dengan "invalid updater binary format". `.deb`/`.rpm`
+  dipasang lewat `pkexec`, jadi pengguna diminta password),
   Windows installer NSIS `-setup.exe`. Masing-masing punya `.sig`, yang
   isinya masuk ke `latest.json` (file `.sig` sendiri tidak diunggah).
 

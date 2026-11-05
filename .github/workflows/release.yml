@@ -82,11 +82,22 @@ jobs:
           --config '{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Collect
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           mkdir -p out
           B=target/release/bundle
           if [ "$RUNNER_OS" = Linux ]; then
             cp $B/deb/*.deb $B/rpm/*.rpm $B/appimage/*.AppImage $B/appimage/*.AppImage.sig out/
+            # Apps installed from .deb/.rpm update with a package of their
+            # own kind (updater key linux-x86_64-deb / -rpm), so those are
+            # signed too when the bundler did not.
+            for f in $B/deb/*.deb $B/rpm/*.rpm; do
+              if [ -f "$f.sig" ]; then cp "$f.sig" out/; else
+                npx --yes @tauri-apps/cli@2 signer sign "$f" && cp "$f.sig" out/
+              fi
+            done
           else
             cp $B/nsis/*-setup.exe $B/nsis/*-setup.exe.sig out/
           fi
@@ -136,3 +147,7 @@ jobs:
           cat "dist-release/$V/latest.json"
           # .sig files are not uploaded: latest.json carries the signatures.
           gh release upload "$TAG" --clobber $(find "dist-release/$V" -type f ! -name '*.sig')
+          # SHA256SUMS for every file of the release (the Mac's lists only macOS).
+          gh release download "$TAG" -D all --skip-existing -p '*' >/dev/null
+          (cd all && rm -f SHA256SUMS && sha256sum -- $(ls | grep -vE '\.sig$|^latest\.json$') > SHA256SUMS && cat SHA256SUMS)
+          gh release upload "$TAG" --clobber all/SHA256SUMS

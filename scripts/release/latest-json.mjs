@@ -10,7 +10,10 @@
 //
 // Platforms are included when their update bundle and its .sig exist:
 //   macOS   JenderalCode_<v>_universal.app.tar.gz  -> darwin-aarch64, darwin-x86_64
-//   Linux   *.AppImage                              -> linux-x86_64
+//   Linux   *.AppImage                              -> linux-x86_64, linux-x86_64-appimage
+//           *.deb / *.rpm                           -> linux-x86_64-deb / -rpm
+//           (the updater looks for `<os>-<arch>-<bundle type>` first; an
+//           app installed from a .deb must get a .deb, not the AppImage)
 //   Windows *-setup.exe (NSIS)                      -> windows-x86_64
 // The app fetches releases/latest/download/latest.json (tauri.conf.json).
 import { createHash, createPublicKey, verify } from "node:crypto";
@@ -61,7 +64,9 @@ const add = (keys, match) => {
   for (const key of keys) platforms[key] = entry;
 };
 add(["darwin-aarch64", "darwin-x86_64"], (f) => f.endsWith(".app.tar.gz"));
-add(["linux-x86_64"], (f) => f.endsWith(".AppImage"));
+add(["linux-x86_64", "linux-x86_64-appimage"], (f) => f.endsWith(".AppImage"));
+add(["linux-x86_64-deb"], (f) => f.endsWith(".deb"));
+add(["linux-x86_64-rpm"], (f) => f.endsWith(".rpm"));
 add(["windows-x86_64"], (f) => f.endsWith("-setup.exe"));
 
 if (Object.keys(platforms).length === 0) {

@@ -53,6 +53,9 @@ if [ "$TARGET" = linux ] || [ "$TARGET" = all ]; then
          npx --yes @tauri-apps/cli@2 build --bundles appimage --config '$UPDATER'"
   cp target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm \
      target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig "$OUT"/
+  # .deb/.rpm installs update with their own package kind: sign them too.
+  run "for f in target/release/bundle/deb/*.deb target/release/bundle/rpm/*.rpm; do [ -f \"\$f.sig\" ] || npx --yes @tauri-apps/cli@2 signer sign \"\$f\"; done"
+  cp target/release/bundle/deb/*.deb.sig target/release/bundle/rpm/*.rpm.sig "$OUT"/
 fi
 
 if [ "$TARGET" = windows ] || [ "$TARGET" = all ]; then
