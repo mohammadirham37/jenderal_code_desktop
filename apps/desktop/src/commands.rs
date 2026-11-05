@@ -675,6 +675,13 @@ pub fn steer_message(state: State<'_, AppState>, session_id: String, content: St
     state.runtime.steer(&session_id, &content)
 }
 
+/// "Enhance prompt": the draft rewritten by the session's model, for the
+/// composer (nothing is sent or stored except the token usage).
+#[tauri::command]
+pub async fn enhance_prompt(state: State<'_, AppState>, session_id: String, text: String) -> CmdResult<String> {
+    state.runtime.enhance_prompt(&session_id, &text).await.map_err(err)
+}
+
 #[tauri::command]
 pub async fn cancel_generation(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state.runtime.cancel(&session_id).await.map_err(err)

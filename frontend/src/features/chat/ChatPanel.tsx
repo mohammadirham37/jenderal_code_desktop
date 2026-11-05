@@ -22,6 +22,7 @@ import {
   MessageSquarePlus,
   Navigation,
   Paperclip,
+  PenLine,
   Pause,
   Play,
   ShieldCheck,
@@ -123,6 +124,9 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
   const [attachments, setAttachments] = useState<string[]>([]);
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  /** "Enhance prompt" is running, and the draft it replaced (for Undo). */
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceUndo, setEnhanceUndo] = useState<string | null>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -185,6 +189,30 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
 
   /** While the agent works, Enter queues the message (sent when the turn
    *  ends) and ⌘/Ctrl+Enter steers the running turn with it. */
+  // The undo offer ends when the draft is sent or cleared.
+  useEffect(() => {
+    if (!input.trim()) setEnhanceUndo(null);
+  }, [input]);
+
+  /** Rewrite the draft with the session's model; the user reviews it here. */
+  const enhance = async () => {
+    const sid = chat.activeSessionId;
+    const draft = input;
+    if (!sid || !draft.trim() || enhancing) return;
+    setEnhancing(true);
+    setNotice(null);
+    try {
+      const better = await api.enhancePrompt(sid, draft);
+      setInput(better);
+      setEnhanceUndo(draft);
+      textareaRef.current?.focus();
+    } catch (e) {
+      setNotice(`Could not enhance the prompt: ${String(e)}`);
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
   const send = async (override?: string, mode: "send" | "steer" = "send") => {
     const text = (override ?? input).trim();
     const pics = override === undefined ? images : [];
@@ -455,6 +483,25 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
           {notice && (
             <div className="mb-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-500">{notice}</div>
           )}
+          {enhanceUndo !== null && !enhancing && (
+            <div className="mb-1.5 flex items-center gap-2 rounded-md bg-accent-500/10 px-2.5 py-1 text-[11px] text-accent-700 dark:text-accent-300">
+              <PenLine size={11} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">Prompt enhanced. Review it, then send.</span>
+              <button
+                className="font-medium underline-offset-2 hover:underline"
+                onClick={() => {
+                  setInput(enhanceUndo);
+                  setEnhanceUndo(null);
+                  textareaRef.current?.focus();
+                }}
+              >
+                Undo
+              </button>
+              <button className="text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200" onClick={() => setEnhanceUndo(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
           <TodoDock key={chat.activeSessionId} runs={chat.toolRuns} />
           <PendingMessages
             steering={steering}
@@ -526,6 +573,11 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
               onPaste={onPaste}
               onKeyDown={(e) => {
                 if (slash.onKeyDown(e) || mention.onKeyDown(e)) return;
+                if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
+                  e.preventDefault();
+                  void enhance();
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   void send(undefined, e.metaKey || e.ctrlKey ? "steer" : "send");
@@ -539,6 +591,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                   : "Open a project first"
               }
               disabled={!workspace}
+              readOnly={enhancing}
               rows={full ? 3 : 2}
               className={`block w-full resize-none overflow-x-hidden bg-transparent px-3 pt-3 leading-relaxed text-neutral-900 placeholder-neutral-400 focus:outline-none dark:text-neutral-200 ${
                 full ? "text-[13px]" : "text-xs"
@@ -547,6 +600,15 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
             <div className="flex items-center gap-0.5 px-1.5 pb-1.5 pt-1">
               <IconButton title="Attach project files" onClick={() => void pickFiles()}>
                 <Paperclip size={13} />
+              </IconButton>
+              <IconButton
+                title={`Enhance prompt: rewrite the draft with this session's model (${isMac ? "⌘⇧E" : "Ctrl+Shift+E"})`}
+                aria-label="Enhance prompt"
+                disabled={!input.trim() || enhancing || !session?.model_name}
+                onClick={() => void enhance()}
+                className={enhancing ? "text-accent-600 dark:text-accent-400" : ""}
+              >
+                {enhancing ? <Spinner className="h-3 w-3" /> : <PenLine size={13} />}
               </IconButton>
               <ComposerControls />
               <div className="ml-auto flex items-center gap-1">

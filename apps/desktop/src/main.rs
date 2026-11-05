@@ -222,6 +222,7 @@ fn main() {
             remote::remote_revoke_device,
             remote::remote_forget_desktop,
             commands::steer_message,
+            commands::enhance_prompt,
             commands::cancel_generation,
             commands::decide_approval,
             commands::set_session_model,

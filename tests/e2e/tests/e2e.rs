@@ -237,3 +237,42 @@ async fn wait_for<T>(mut f: impl FnMut() -> Option<T>, timeout_ms: u64) -> Optio
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
+
+/// "Enhance prompt": one tool-less call to the session's model; the reply
+/// replaces the draft and only the token usage is stored.
+#[tokio::test]
+async fn enhance_prompt_uses_the_session_model() -> anyhow::Result<()> {
+    let data = tempfile::tempdir()?;
+    let project = tempfile::tempdir()?;
+    let db = Arc::new(Db::open(data.path().join("jenderalcode.db"))?);
+    seed_defaults(&db).await?;
+    let sink = Arc::new(E2ESink { approvals: Mutex::new(Vec::new()), tool_events: AtomicUsize::new(0), idle: AtomicBool::new(false) });
+    let runtime = AgentRuntime::new(
+        db.clone(),
+        Arc::new(FileCredentialStore::new(data.path().join("credentials.json"))?),
+        sink.clone(),
+        data.path().join("checkpoints"),
+    );
+    let ws = db.upsert_workspace(project.path().to_str().unwrap(), "shop")?;
+    let session = db.create_session(&ws.id, "New session", Some("build"), Some("mock"), Some("mock-standard"))?;
+
+    let out = runtime.enhance_prompt(&session.id, "  hi, explain the readme  ").await?;
+    assert!(out.starts_with("Hello!"), "the mock's reply, trimmed: {out}");
+    assert!(db.list_messages(&session.id)?.is_empty(), "nothing is sent or stored as a message");
+    assert_eq!(sink.tool_events.load(Ordering::SeqCst), 0);
+    let usage = db.session_usage(&session.id)?;
+    assert_eq!(usage.requests, 1, "usage is recorded");
+
+    // A model that answers with a tool call anyway: only its text is used,
+    // nothing runs.
+    let out = runtime.enhance_prompt(&session.id, "write a file").await?;
+    assert!(out.starts_with("Sure"), "{out}");
+    assert_eq!(sink.tool_events.load(Ordering::SeqCst), 0);
+    assert!(!project.path().join("mock-demo.txt").exists());
+
+    assert!(runtime.enhance_prompt(&session.id, "   ").await.is_err(), "empty draft");
+    let none = db.create_session(&ws.id, "No model", Some("build"), None, None)?;
+    let err = runtime.enhance_prompt(&none.id, "hello").await.unwrap_err().to_string();
+    assert!(err.contains("model"), "{err}");
+    Ok(())
+}

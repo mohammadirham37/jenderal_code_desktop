@@ -840,6 +840,17 @@ impl RemoteController {
                     .map_err(|e| bad(format!("{e:#}")))?;
                 Ok(json!({}))
             }
+            "chat.enhance" => {
+                let sid = Self::str_param(&params, "session_id")?.to_string();
+                let text = Self::content_param(&params)?;
+                self.session(&sid).await?;
+                let text = self
+                    .rt()?
+                    .enhance_prompt(&sid, &text)
+                    .await
+                    .map_err(|e| AppError::new("enhance_failed", format!("{e:#}")))?;
+                Ok(json!({ "text": text }))
+            }
             "chat.steer" => {
                 let sid = Self::str_param(&params, "session_id")?;
                 let content = Self::content_param(&params)?;

@@ -2,6 +2,7 @@
 //! approvals, cancellation, usage tracking, and event emission (PRD §8, §12).
 
 pub mod context;
+pub mod enhance;
 pub mod executor;
 pub mod mcp;
 pub mod retry;

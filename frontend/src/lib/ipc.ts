@@ -576,6 +576,8 @@ export const api = {
     invoke<void>("send_message", { sessionId, content, attachments, images }),
   /** Add a message to the running turn; `null` when no turn is running. */
   steerMessage: (sessionId: string, content: string) => invoke<string | null>("steer_message", { sessionId, content }),
+  /** The draft rewritten by the session's model ("Enhance prompt"). */
+  enhancePrompt: (sessionId: string, text: string) => invoke<string>("enhance_prompt", { sessionId, text }),
   cancelGeneration: (sessionId: string) => invoke<void>("cancel_generation", { sessionId }),
   decideApproval: (approvalId: string, approved: boolean, grant?: string) =>
     invoke<void>("decide_approval", { approvalId, approved, grant: grant ?? null }),
