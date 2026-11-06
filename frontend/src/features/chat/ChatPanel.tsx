@@ -597,8 +597,8 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                 full ? "text-[13px]" : "text-xs"
               }`}
             />
-            <div className="flex items-center gap-0.5 px-1.5 pb-1.5 pt-1">
-              <IconButton title="Attach project files" onClick={() => void pickFiles()}>
+            <div className="flex min-w-0 items-center gap-0.5 px-1.5 pb-1.5 pt-1">
+              <IconButton className="shrink-0" title="Attach project files" onClick={() => void pickFiles()}>
                 <Paperclip size={13} />
               </IconButton>
               <IconButton
@@ -606,18 +606,13 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                 aria-label="Enhance prompt"
                 disabled={!input.trim() || enhancing || !session?.model_name}
                 onClick={() => void enhance()}
-                className={enhancing ? "text-accent-600 dark:text-accent-400" : ""}
+                className={`shrink-0 ${enhancing ? "text-accent-600 dark:text-accent-400" : ""}`}
               >
                 {enhancing ? <Spinner className="h-3 w-3" /> : <PenLine size={13} />}
               </IconButton>
-              <ComposerControls />
-              <div className="ml-auto flex items-center gap-1">
+              <ComposerControls compact={!full} />
+              <div className="ml-auto flex shrink-0 items-center gap-1 pl-1">
                 <ContextMeter />
-                {!full && (
-                  <span className="hidden text-[10px] text-neutral-400 xl:inline">
-                    {busy ? "⏎ queue · ⌘⏎ steer" : "⏎ send · ⇧⏎ newline"}
-                  </span>
-                )}
                 {busy ? (
                   <>
                     {input.trim() && (
@@ -640,7 +635,7 @@ export function ChatPanel({ variant = "side" }: { variant?: ChatVariant }) {
                   </>
                 ) : (
                   <button
-                    title="Send (Enter)"
+                    title={`Send (Enter · ${isMac ? "⇧⏎" : "Shift+Enter"} for a new line)`}
                     onClick={() => void send()}
                     disabled={(!input.trim() && images.length === 0) || !chat.activeSessionId}
                     className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-accent-600 text-white transition-colors hover:bg-accent-700 disabled:bg-neutral-200 disabled:text-neutral-400 dark:bg-accent-400 dark:text-neutral-950 dark:hover:bg-accent-300 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-600"
@@ -744,7 +739,10 @@ function PendingMessages({
 }
 
 /** Agent / permission policy / model pickers shown in the composer toolbar. */
-function ComposerControls() {
+/** Agent, permission mode and model pickers. `compact` (Code layout's
+ *  narrow side panel) shows the mode as an icon only (its name is in the
+ *  tooltip and the menu) so nothing wraps. */
+function ComposerControls({ compact = false }: { compact?: boolean }) {
   const { sessions, activeSessionId, profiles } = useChat(
     useShallow((s) => ({ sessions: s.sessions, activeSessionId: s.activeSessionId, profiles: s.profiles })),
   );
@@ -760,11 +758,11 @@ function ComposerControls() {
   const modelLabel = session?.model_name ?? "Select model";
 
   const chip =
-    "flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800";
+    "flex min-w-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800";
 
   return (
     <>
-      <div className="relative">
+      <div className="relative shrink-0">
         <button className={chip} onClick={() => toggle("agent")} title="Agent profile">
           <Bot size={12} className="text-accent-600 dark:text-accent-400" />
           {currentProfile?.name ?? "Build"}
@@ -789,9 +787,9 @@ function ComposerControls() {
         )}
       </div>
 
-      <div className="relative">
+      <div className="relative shrink-0">
         <button
-          title={policyMeta.desc}
+          title={`${policyMeta.label}: ${policyMeta.desc}`}
           className={`${chip} ${currentPolicy === "yolo" ? "!text-amber-500" : ""}`}
           onClick={() => toggle("policy")}
         >
@@ -800,7 +798,7 @@ function ComposerControls() {
           ) : (
             <ShieldCheck size={12} className={currentPolicy === "balanced" ? "text-sky-400" : "text-emerald-500"} />
           )}
-          {policyMeta.label}
+          {!compact && policyMeta.label}
           <ChevronDown size={10} />
         </button>
         {menu === "policy" && (
@@ -838,9 +836,9 @@ function ComposerControls() {
       </div>
 
       <div className="relative min-w-0">
-        <button className={chip} onClick={() => toggle("model")} title="Model">
+        <button className={`${chip} max-w-full`} onClick={() => toggle("model")} title={`Model: ${modelLabel}`}>
           <Cpu size={12} className="shrink-0 text-accent-600 dark:text-accent-400" />
-          <span className="max-w-36 truncate">{modelLabel}</span>
+          <span className={`min-w-0 truncate ${compact ? "" : "max-w-36"}`}>{modelLabel}</span>
           <ChevronDown size={10} className="shrink-0" />
         </button>
         {menu === "model" && (

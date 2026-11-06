@@ -287,6 +287,10 @@ export const useChat = create<ChatState>((set, get) => ({
 
   newSession: async (workspaceId, agentProfileId, providerId, modelName) => {
     const s = await api.createSession(workspaceId, agentProfileId, providerId, modelName);
+    // In the list before it becomes active: ChatPanel's "ensure a session"
+    // effect switches away from an active session it cannot find, which
+    // made the first click on New conversation look like it did nothing.
+    set((st) => ({ sessions: st.sessions.some((x) => x.id === s.id) ? st.sessions : [s, ...st.sessions] }));
     await get().selectSession(s.id);
     await get().loadSessions(workspaceId);
     return s.id;
