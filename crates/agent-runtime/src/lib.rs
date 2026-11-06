@@ -800,6 +800,8 @@ impl AgentRuntime {
         // keeps retrying an identical failing call is stuck, so pause the
         // turn instead of burning the remaining iterations.
         let mut repeated_failures: HashMap<String, u32> = HashMap::new();
+        // Mid-response connection drops in a row (reset by a complete step).
+        let mut stream_drops = 0usize;
         loop {
             iteration += 1;
             if iteration > max_iterations {
@@ -874,6 +876,7 @@ impl AgentRuntime {
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             let mut usage = TokenUsage::default();
             let mut cancelled = false;
+            let mut interrupted: Option<String> = None;
 
             loop {
                 tokio::select! {
@@ -911,6 +914,10 @@ impl AgentRuntime {
                                 tool_calls[index] = ToolCall { id, name, arguments };
                             }
                             Some(StreamEvent::Usage(u)) => usage = u,
+                            Some(StreamEvent::Error(e)) => {
+                                interrupted = Some(e);
+                                break;
+                            }
                             Some(StreamEvent::Done { stop_reason: r }) => {
                                 stop_reason = r;
                                 break;
@@ -925,6 +932,54 @@ impl AgentRuntime {
                 }
             }
             drop(stream);
+
+            // The connection broke mid-response. Nothing of this step has
+            // run yet (tools run after the stream), so drop the partial
+            // answer and ask again with the same history.
+            if let Some(e) = interrupted.take().filter(|_| !cancelled) {
+                if let Some(delay) = retry::RETRY_DELAYS.get(stream_drops).copied() {
+                    stream_drops += 1;
+                    let note = format!(
+                        "Connection to the provider dropped, retrying in {}s (attempt {}/{}): {e}",
+                        delay.as_secs(),
+                        stream_drops + 1,
+                        retry::RETRY_DELAYS.len() + 1
+                    );
+                    sink.status(session_id, ChatStatus::Thinking, Some(note)).await;
+                    if !retry::wait(delay, &cancel).await {
+                        sink.status(session_id, ChatStatus::Idle, Some("cancelled".into())).await;
+                        return Ok(());
+                    }
+                    iteration -= 1;
+                    continue;
+                }
+                // Out of retries: keep any text that arrived (its tool calls
+                // are incomplete), then report the error.
+                if !text.trim().is_empty() {
+                    let partial = MessageRecord {
+                        images: vec![],
+                        id: assistant_id.clone(),
+                        session_id: session_id.into(),
+                        role: Role::Assistant,
+                        content: text.clone(),
+                        tool_calls: vec![],
+                        tool_call_id: None,
+                        tool_name: None,
+                        reasoning: (!reasoning.is_empty()).then(|| reasoning.clone()),
+                        created_at: now_ms(),
+                    };
+                    db.append_message(&partial)?;
+                    sink.message(session_id, &partial).await;
+                    history.push(to_chat_message(partial));
+                }
+                sink.error(
+                    session_id,
+                    &format!("The connection to the provider kept dropping during the response ({e}). Send the message again to retry."),
+                )
+                .await;
+                break;
+            }
+            stream_drops = 0;
 
             for (i, tc) in tool_calls.iter_mut().enumerate() {
                 if tc.id.is_empty() {

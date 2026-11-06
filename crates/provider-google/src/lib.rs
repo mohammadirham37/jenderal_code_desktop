@@ -360,8 +360,9 @@ where
         let chunk = match chunk {
             Ok(c) => c,
             Err(e) => {
-                let _ = send(&tx, StreamEvent::TextDelta(format!("\n[stream error: {e}]")));
-                break;
+                // The runtime retries the step; no Done after an error.
+                let _ = send(&tx, StreamEvent::Error(e.to_string()));
+                return;
             }
         };
         for line in lines.push(chunk.as_ref()) {

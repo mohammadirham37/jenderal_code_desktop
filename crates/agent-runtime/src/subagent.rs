@@ -111,10 +111,23 @@ impl AgentRuntime {
                 temperature: None,
                 max_tokens: env.model_info.as_ref().and_then(|m| m.capabilities.max_output_tokens),
             };
-            let stream = retry::open_stream(env.provider.as_ref(), &request, cancel, &retry::RETRY_DELAYS, |_, _, _| async {})
-                .await?
-                .ok_or_else(|| anyhow!("cancelled"))?;
-            let reply = collect(stream, cancel).await?;
+            // A connection that drops mid-response is retried like one that
+            // fails to open (nothing has run yet).
+            let mut dropped = 0;
+            let reply = loop {
+                let stream = retry::open_stream(env.provider.as_ref(), &request, cancel, &retry::RETRY_DELAYS, |_, _, _| async {})
+                    .await?
+                    .ok_or_else(|| anyhow!("cancelled"))?;
+                let mut reply = collect(stream, cancel).await?;
+                let Some(e) = reply.interrupted.take() else { break reply };
+                let Some(delay) = retry::RETRY_DELAYS.get(dropped).copied() else {
+                    bail!("the connection to the provider dropped during the response: {e}");
+                };
+                dropped += 1;
+                if !retry::wait(delay, cancel).await {
+                    bail!("cancelled");
+                }
+            };
             record_usage(db, sink, session_id, env.provider_cfg, env.model_name, env.model_info, reply.usage).await;
             let mut msg = ChatMessage::new(Role::Assistant, reply.text.clone());
             msg.tool_calls = reply.calls.clone();
@@ -187,10 +200,18 @@ struct Reply {
     reasoning: String,
     calls: Vec<ToolCall>,
     usage: TokenUsage,
+    /// The stream broke mid-response (`StreamEvent::Error`).
+    interrupted: Option<String>,
 }
 
 async fn collect(mut stream: futures::stream::BoxStream<'static, StreamEvent>, cancel: &CancelToken) -> Result<Reply> {
-    let mut reply = Reply { text: String::new(), reasoning: String::new(), calls: Vec::new(), usage: TokenUsage::default() };
+    let mut reply = Reply {
+        text: String::new(),
+        reasoning: String::new(),
+        calls: Vec::new(),
+        usage: TokenUsage::default(),
+        interrupted: None,
+    };
     loop {
         let ev = tokio::select! {
             ev = stream.next() => ev,
@@ -219,6 +240,10 @@ async fn collect(mut stream: futures::stream::BoxStream<'static, StreamEvent>, c
                 reply.calls[index] = ToolCall { id, name, arguments };
             }
             Some(StreamEvent::Usage(u)) => reply.usage = u,
+            Some(StreamEvent::Error(e)) => {
+                reply.interrupted = Some(e);
+                break;
+            }
             Some(StreamEvent::Done { .. }) | None => break,
         }
     }
@@ -334,5 +359,51 @@ mod tests {
         assert!(tool_results[1].contains("needs the user's approval"), "sensitive read refused: {}", tool_results[1]);
         assert!(tool_results[2].contains("not available to sub-agents"));
         assert!(!dir.path().join("x").exists());
+    }
+
+    /// A connection that drops mid-response is asked again; the cut-off
+    /// text is not part of the report.
+    #[tokio::test]
+    async fn subagent_retries_a_dropped_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = jcode_tool_filesystem::Workspace::open(dir.path()).unwrap();
+        let provider = Arc::new(Scripted {
+            replies: Mutex::new(vec![
+                vec![StreamEvent::TextDelta("half an ans".into()), StreamEvent::Error("error decoding response body".into())],
+                vec![StreamEvent::TextDelta("full answer".into()), StreamEvent::Done { stop_reason: None }],
+            ]),
+            requests: Mutex::new(vec![]),
+        });
+        let provider_dyn: Arc<dyn AiProvider> = provider.clone();
+        let db = Arc::new(Db::open_memory().unwrap());
+        let sink: Arc<dyn EventSink> = Arc::new(NoopSink);
+        let rt = AgentRuntime::new(
+            db.clone(),
+            Arc::new(jcode_provider_core::FileCredentialStore::new(dir.path().join("c.json")).unwrap()),
+            sink.clone(),
+            dir.path().join("ck"),
+        );
+        let cfg = ProviderConfig {
+            id: "scripted".into(),
+            name: "Scripted".into(),
+            kind: ProviderKind::Mock,
+            base_url: String::new(),
+            enabled: true,
+            created_at: 0,
+            updated_at: 0,
+            extra: json!({}),
+            credential_ref: None,
+        };
+        let env = TurnEnv { provider: &provider_dyn, provider_cfg: &cfg, model_name: "m", model_info: &None, system: "S", budget: 0 };
+        let ctx = executor::ToolContext::new("s", ws.clone(), None);
+        let policy = Arc::new(Mutex::new(PolicyEngine::new(jcode_common::PolicyMode::Safe, ws.root())));
+        let (report, _) = rt
+            .run_subagent("s", "q", &env, &ctx, &policy, &CancelToken::new(), &db, &sink)
+            .await
+            .unwrap();
+        assert_eq!(report, "full answer");
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].messages.len(), requests[1].messages.len(), "same history on retry");
     }
 }

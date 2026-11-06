@@ -339,8 +339,9 @@ where
         let chunk = match chunk {
             Ok(c) => c,
             Err(e) => {
-                let _ = send(&tx, StreamEvent::TextDelta(format!("\n[stream error: {e}]")));
-                break;
+                // The runtime retries the step; no Done after an error.
+                let _ = send(&tx, StreamEvent::Error(e.to_string()));
+                return;
             }
         };
         for line in lines.push(chunk.as_ref()) {
@@ -574,5 +575,20 @@ mod tests {
         });
         pump_sse(Box::pin(stream), tx).await;
         assert_eq!(polled.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_broken_body_ends_with_an_error_event_not_text() {
+        let (tx, rx) = mpsc::unbounded::<StreamEvent>();
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+            Ok(b"data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n".to_vec()),
+            Err(std::io::Error::other("error decoding response body")),
+            Ok(b"data: {\"choices\":[{\"delta\":{\"content\":\"never\"}}]}\n".to_vec()),
+        ];
+        pump_sse(Box::pin(futures::stream::iter(chunks)), tx).await;
+        let events: Vec<StreamEvent> = rx.collect().await;
+        assert!(matches!(&events[0], StreamEvent::TextDelta(t) if t == "Hel"));
+        assert!(matches!(&events[1], StreamEvent::Error(e) if e.contains("decoding response body")));
+        assert_eq!(events.len(), 2, "nothing after the error, and no [stream error] text");
     }
 }

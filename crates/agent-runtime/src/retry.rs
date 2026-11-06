@@ -17,6 +17,14 @@ pub const RETRY_DELAYS: [Duration; 5] = [
     Duration::from_secs(30),
 ];
 
+/// Wait `delay` unless cancelled first (false then).
+pub async fn wait(delay: Duration, cancel: &CancelToken) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(delay) => true,
+        _ = cancel.cancelled() => false,
+    }
+}
+
 /// Is this provider error worth retrying?
 pub fn is_retryable(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();

@@ -457,6 +457,9 @@ pub enum StreamEvent {
         arguments: String,
     },
     Usage(TokenUsage),
+    /// The connection broke mid-response (e.g. "error decoding response
+    /// body"). The stream ends after it; the runtime retries the step.
+    Error(String),
     Done {
         #[serde(default)]
         stop_reason: Option<StopReason>,

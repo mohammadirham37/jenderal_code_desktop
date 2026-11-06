@@ -152,6 +152,15 @@ export const useChat = create<ChatState>((set, get) => ({
         running.add(e.session_id);
       }
       if (e.session_id !== get().activeSessionId) return;
+      // Back to "thinking" with a streamed answer still unsaved: it was cut
+      // off (the connection dropped) and the step is being retried. Saved
+      // answers already left `streaming` via chat://message.
+      if (e.status === "thinking" && (get().streaming || pending)) {
+        pending = null;
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        set({ streaming: null });
+      }
       set({ status: e.status, statusDetail: e.detail ?? null });
     });
     // Deltas arrive per token; coalesce them into one store update per
