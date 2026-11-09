@@ -508,11 +508,21 @@ pub struct AgentCli {
     /// They come before `bypass_args` (`codex resume --last <flags>`).
     #[serde(default)]
     pub resume_args: Option<String>,
+    /// Shell command that installs the CLI (the official installer), offered
+    /// in the "+" menu when the program is not found. Runs in a terminal tab
+    /// after the user confirms it.
+    #[serde(default)]
+    pub install_command: Option<String>,
 }
 
 fn default_agent_enabled() -> bool {
     true
 }
+
+/// Command Code's program: `cmd` is in every release of the npm package
+/// (`commandcode` only from 0.11), but on Windows `cmd` is the system shell,
+/// so the package names it `cmdc` there.
+pub const COMMAND_CODE_BIN: &str = if cfg!(windows) { "cmdc" } else { "cmd" };
 
 pub fn default_agent_clis() -> Vec<AgentCli> {
     [
@@ -520,8 +530,7 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
         ("codex", "Codex", "codex", Some("--dangerously-bypass-approvals-and-sandbox"), Some("resume --last")),
         ("opencode", "OpenCode", "opencode", Some("--auto"), Some("--continue")),
         ("antigravity", "Antigravity", "agy", Some("--dangerously-skip-permissions"), Some("--continue")),
-        // `commandcode`, not the short `cmd` alias, which is cmd.exe on Windows.
-        ("commandcode", "Command Code", "commandcode", Some("--yolo"), Some("--continue")),
+        ("commandcode", "Command Code", COMMAND_CODE_BIN, Some("--yolo"), Some("--continue")),
         ("gemini", "Gemini", "gemini", None, None),
         ("goose", "Goose", "goose session", None, None),
         ("aider", "Aider", "aider", None, None),
@@ -534,8 +543,34 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
         enabled: true,
         bypass_args: bypass.map(String::from),
         resume_args: resume.map(String::from),
+        install_command: default_install_command(id).map(String::from),
     })
     .collect()
+}
+
+/// The official installer of a preset agent CLI, for this platform. Terminal
+/// tabs run commands with `$SHELL -c` on macOS/Linux and PowerShell on
+/// Windows.
+pub fn default_install_command(id: &str) -> Option<&'static str> {
+    let (unix, windows) = match id {
+        "claude" => ("curl -fsSL https://claude.ai/install.sh | bash", Some("irm https://claude.ai/install.ps1 | iex")),
+        "codex" => ("npm install -g @openai/codex", Some("npm install -g @openai/codex")),
+        "opencode" => ("npm install -g opencode-ai", Some("npm install -g opencode-ai")),
+        "antigravity" => (
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+            Some("irm https://antigravity.google/cli/install.ps1 | iex"),
+        ),
+        "commandcode" => ("npm install -g command-code", Some("npm install -g command-code")),
+        "gemini" => ("npm install -g @google/gemini-cli", Some("npm install -g @google/gemini-cli")),
+        "goose" => ("curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash", None),
+        "aider" => ("curl -LsSf https://aider.chat/install.sh | sh", Some("irm https://aider.chat/install.ps1 | iex")),
+        _ => return None,
+    };
+    if cfg!(windows) {
+        windows
+    } else {
+        Some(unix)
+    }
 }
 
 /// An installed skill, for the Skills settings and the `/` menu.
@@ -792,6 +827,7 @@ mod tests {
         assert!(s.agent_clis.iter().all(|a| a.enabled));
         let claude = &s.agent_clis[0];
         assert_eq!(claude.bypass_args.as_deref(), Some("--dangerously-skip-permissions"));
+        assert!(s.agent_clis.iter().all(|a| a.install_command.is_some() || (cfg!(windows) && a.id == "goose")));
         assert_eq!(AppSettings::default().agent_clis, default_agent_clis());
     }
 

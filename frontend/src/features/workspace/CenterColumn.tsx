@@ -2,7 +2,7 @@
  *  agent-CLI tabs opened from the "+" menu. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Bot, MessageSquare, Plus, RotateCcw, Settings, ShieldOff, Smartphone, Terminal as TerminalIcon, X } from "lucide-react";
+import { Bot, Download, MessageSquare, Plus, RotateCcw, Settings, ShieldOff, Smartphone, Terminal as TerminalIcon, X } from "lucide-react";
 import { ChatPanel } from "@/features/chat/ChatPanel";
 import { useApp } from "@/stores/app";
 import { CHAT_TAB, useCenterTabs, type CenterTab } from "@/stores/centerTabs";
@@ -195,6 +195,7 @@ function NewTabMenu() {
           {enabled.map((a) => {
             const missing = installed?.[a.id] === false;
             const bypass = a.bypass_args?.trim();
+            const installer = missing ? a.install_command?.trim() : undefined;
             return (
               <div key={a.id} className="group/agent flex items-center gap-0.5">
                 <div className="min-w-0 flex-1">
@@ -206,7 +207,24 @@ function NewTabMenu() {
                     onClick={() => run(() => void useCenterTabs.getState().openAgent(a))}
                   />
                 </div>
-                {bypass && (
+                {installer && (
+                  <button
+                    title={`Install ${a.name}: ${installer}`}
+                    onClick={() =>
+                      run(() => {
+                        void confirmAction(
+                          `Install ${a.name}?\n\nThis runs in a new terminal tab:\n${installer}\n\nThe ${a.name} menu entry is checked again when it finishes.`,
+                        ).then((ok) => {
+                          if (ok) void useCenterTabs.getState().installAgent(a);
+                        });
+                      })
+                    }
+                    className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1.5 font-mono text-[10px] text-accent-600 transition-colors hover:bg-accent-500/10 dark:text-accent-400"
+                  >
+                    <Download size={12} /> install
+                  </button>
+                )}
+                {bypass && !installer && (
                   <button
                     title={`Open with bypass permissions: ${a.command} ${bypass}`}
                     onClick={() => run(() => void useCenterTabs.getState().openAgent(a, true))}

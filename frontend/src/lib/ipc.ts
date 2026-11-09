@@ -179,6 +179,8 @@ export interface AgentCli {
   bypass_args?: string | null;
   /** Arguments that continue the last conversation (restored tabs). */
   resume_args?: string | null;
+  /** Official installer, offered when the program is not found. */
+  install_command?: string | null;
 }
 
 export interface AppSettings {

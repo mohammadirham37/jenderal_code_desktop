@@ -27,7 +27,24 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("014_workspace_hidden", include_str!("../migrations/014_workspace_hidden.sql")),
     ("015_remote_peers", include_str!("../migrations/015_remote_peers.sql")),
     ("016_commandcode_agent", include_str!("../migrations/016_commandcode_agent.sql")),
+    ("017_commandcode_bin", include_str!("../migrations/017_commandcode_bin.sql")),
+    ("018_agent_install_commands", include_str!("../migrations/018_agent_install_commands.sql")),
 ];
+
+/// A migration's SQL with the platform-dependent placeholders filled in:
+/// `@COMMAND_CODE_BIN@` becomes [`jcode_common::COMMAND_CODE_BIN`] and
+/// `@AGENT_INSTALL_COMMANDS@` a `SELECT id, cmd` of the presets' installers
+/// ([`jcode_common::default_install_command`]).
+fn migration_sql(sql: &str) -> String {
+    let quote = |v: &str| format!("'{}'", v.replace('\'', "''"));
+    let installers = jcode_common::default_agent_clis()
+        .into_iter()
+        .filter_map(|a| Some(format!("SELECT {} AS id, {} AS cmd", quote(&a.id), quote(a.install_command.as_deref()?))))
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    sql.replace("@COMMAND_CODE_BIN@", jcode_common::COMMAND_CODE_BIN)
+        .replace("@AGENT_INSTALL_COMMANDS@", &installers)
+}
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -107,7 +124,7 @@ impl Db {
                 )
                 .map(|c| c > 0)?;
             if !applied {
-                conn.execute_batch(sql)
+                conn.execute_batch(&migration_sql(sql))
                     .with_context(|| format!("applying migration {name}"))?;
                 conn.execute(
                     "INSERT INTO _migrations(name, applied_at) VALUES (?1, ?2)",
@@ -1393,7 +1410,8 @@ mod tests {
         settings.agent_clis[0].enabled = false;
         d.save_settings(&settings).unwrap();
 
-        let sql = include_str!("../migrations/016_commandcode_agent.sql");
+        let sql = migration_sql(include_str!("../migrations/016_commandcode_agent.sql"));
+        let sql = sql.as_str();
         for _ in 0..2 {
             d.with_conn(|c| Ok(c.execute_batch(sql)?)).unwrap();
         }
@@ -1406,6 +1424,60 @@ mod tests {
         assert!(cc.enabled);
         assert_eq!(cc.bypass_args.as_deref(), Some("--yolo"));
         assert_eq!(cc.resume_args.as_deref(), Some("--continue"));
+    }
+
+    #[test]
+    fn commandcode_agent_uses_the_cmd_alias() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        let cc = settings.agent_clis.iter_mut().find(|a| a.id == "commandcode").unwrap();
+        cc.command = "commandcode".into(); // as written by 016
+        // A command the user chose themselves is kept.
+        settings.agent_clis.push(jcode_common::AgentCli {
+            id: "mine".into(),
+            name: "Mine".into(),
+            command: "commandcode".into(),
+            enabled: true,
+            bypass_args: None,
+            resume_args: None,
+            install_command: None,
+        });
+        d.save_settings(&settings).unwrap();
+
+        let sql = migration_sql(include_str!("../migrations/017_commandcode_bin.sql"));
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(&sql)?)).unwrap();
+        }
+        let agents = d.get_settings().unwrap().agent_clis;
+        let cmd = |id: &str| agents.iter().find(|a| a.id == id).unwrap().command.clone();
+        assert_eq!(cmd("commandcode"), if cfg!(windows) { "cmdc" } else { "cmd" });
+        assert_eq!(cmd("mine"), "commandcode");
+        assert_eq!(cmd("claude"), "claude");
+        assert_eq!(agents.len(), settings.agent_clis.len());
+    }
+
+    #[test]
+    fn install_commands_are_added_to_saved_agent_lists_once() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        for a in &mut settings.agent_clis {
+            a.install_command = None;
+        }
+        // A value the user chose is kept.
+        settings.agent_clis[1].install_command = Some("brew install codex".into());
+        d.save_settings(&settings).unwrap();
+
+        let sql = migration_sql(include_str!("../migrations/018_agent_install_commands.sql"));
+        assert!(!sql.contains("@AGENT_INSTALL_COMMANDS@"));
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(&sql)?)).unwrap();
+        }
+        let agents = d.get_settings().unwrap().agent_clis;
+        let install = |id: &str| agents.iter().find(|a| a.id == id).unwrap().install_command.clone();
+        assert_eq!(install("claude").as_deref(), jcode_common::default_install_command("claude"));
+        assert_eq!(install("codex").as_deref(), Some("brew install codex"));
+        assert_eq!(install("commandcode").as_deref(), Some("npm install -g command-code"));
+        assert_eq!(agents.len(), settings.agent_clis.len(), "order and entries kept");
     }
 
     #[test]

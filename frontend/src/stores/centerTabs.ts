@@ -25,6 +25,9 @@ export interface CenterTab {
   error?: string;
   /** Opened from a paired phone; its size follows the phone. */
   remote?: boolean;
+  /** Runs an agent's installer; not saved, and the agent list is checked
+   *  again when it ends. */
+  install?: boolean;
 }
 
 interface ParkedTabs {
@@ -43,6 +46,8 @@ interface CenterTabsState {
   setActive: (id: string) => void;
   openTerminal: () => Promise<void>;
   openAgent: (agent: AgentCli, bypass?: boolean) => Promise<void>;
+  /** Run the agent's `install_command` in a tab (after the user confirmed). */
+  installAgent: (agent: AgentCli) => Promise<void>;
   restart: (id: string) => Promise<void>;
   close: (id: string) => Promise<void>;
   detectInstalled: () => Promise<void>;
@@ -128,7 +133,15 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
   const listenExit = () => {
     if (!exitListening) {
       exitListening = true;
-      void events.terminalExit((e) => patch(e.terminal_id, { exited: true }));
+      void events.terminalExit((e) => {
+        patch(e.terminal_id, { exited: true });
+        const s = get();
+        const all = [...s.tabs, ...Object.values(s.parked).flatMap((p) => p.tabs)];
+        if (all.some((t) => t.id === e.terminal_id && t.install)) {
+          set({ installed: null });
+          void get().detectInstalled();
+        }
+      });
     }
   };
 
@@ -183,6 +196,12 @@ export const useCenterTabs = create<CenterTabsState>((set, get) => {
         bypass: !!flags,
         exited: false,
       });
+    },
+
+    installAgent: (agent) => {
+      const command = agent.install_command?.trim();
+      if (!command) return Promise.resolve();
+      return open({ id: newTabId(), title: `Install ${agent.name}`, command, install: true, exited: false });
     },
 
     restart: async (id) => {
@@ -316,9 +335,10 @@ onWorkspaceRemoved((id) => useCenterTabs.getState().killProject(id));
 function persist() {
   const s = useCenterTabs.getState();
   const projects: SavedProjects = { ...unrestored };
-  for (const [ws, p] of Object.entries(s.parked)) projects[ws] = { tabs: p.tabs.map(toSaved), activeId: p.activeId };
+  for (const [ws, p] of Object.entries(s.parked))
+    projects[ws] = { tabs: p.tabs.filter((t) => !t.install).map(toSaved), activeId: p.activeId };
   const current = useApp.getState().workspace?.id;
-  if (current) projects[current] = { tabs: s.tabs.map(toSaved), activeId: s.activeId };
+  if (current) projects[current] = { tabs: s.tabs.filter((t) => !t.install).map(toSaved), activeId: s.activeId };
   for (const [ws, p] of Object.entries(projects)) if (!p.tabs.length) delete projects[ws];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }

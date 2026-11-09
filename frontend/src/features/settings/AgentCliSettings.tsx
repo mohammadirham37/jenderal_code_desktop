@@ -11,59 +11,78 @@ export function AgentCliSettings() {
   const [draft, setDraft] = useState<AgentCli[]>(agents);
   useEffect(() => setDraft(agents), [agents]);
 
-  const save = (next: AgentCli[]) => void useApp.getState().updateSettings({ agent_clis: next });
+  const save = (next: AgentCli[]) =>
+    void useApp.getState().updateSettings({ agent_clis: next });
   const edit = (i: number, p: Partial<AgentCli>) =>
     setDraft((d) => d.map((a, j) => (j === i ? { ...a, ...p } : a)));
 
   return (
     <div className="space-y-1.5">
       {draft.map((a, i) => (
-        <div key={a.id} className="flex items-center gap-2">
-          <Toggle
-            checked={a.enabled}
-            onChange={(enabled) => save(draft.map((x, j) => (j === i ? { ...x, enabled } : x)))}
-          />
-          <div className="w-36 shrink-0">
-            <input
-              className={inputClass}
-              value={a.name}
-              placeholder="Name"
-              onChange={(e) => edit(i, { name: e.target.value })}
-              onBlur={() => save(draft)}
+        <div key={a.id} className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Toggle
+              checked={a.enabled}
+              onChange={(enabled) =>
+                save(draft.map((x, j) => (j === i ? { ...x, enabled } : x)))
+              }
             />
+            <div className="w-36 shrink-0">
+              <input
+                className={inputClass}
+                value={a.name}
+                placeholder="Name"
+                onChange={(e) => edit(i, { name: e.target.value })}
+                onBlur={() => save(draft)}
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <input
+                className={`${inputClass} font-mono`}
+                value={a.command}
+                placeholder="command --flags"
+                onChange={(e) => edit(i, { command: e.target.value })}
+                onBlur={() => save(draft)}
+              />
+            </div>
+            <div className="w-52 shrink-0">
+              <input
+                className={`${inputClass} font-mono`}
+                value={a.bypass_args ?? ""}
+                placeholder="bypass flags (optional)"
+                title="Appended when you open the agent with bypass permissions"
+                onChange={(e) => edit(i, { bypass_args: e.target.value })}
+                onBlur={() => save(draft)}
+              />
+            </div>
+            <div className="w-36 shrink-0">
+              <input
+                className={`${inputClass} font-mono`}
+                value={a.resume_args ?? ""}
+                placeholder="resume args"
+                title="Used when a tab is restored after the app restarts, to continue the last conversation (e.g. --continue)"
+                onChange={(e) => edit(i, { resume_args: e.target.value })}
+                onBlur={() => save(draft)}
+              />
+            </div>
+            <IconButton
+              title="Remove"
+              onClick={() => save(draft.filter((_, j) => j !== i))}
+            >
+              <Trash2 size={12} />
+            </IconButton>
           </div>
-          <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 pl-[3.25rem] pr-8">
+            <span className="eyebrow w-14 shrink-0">install</span>
             <input
               className={`${inputClass} font-mono`}
-              value={a.command}
-              placeholder="command --flags"
-              onChange={(e) => edit(i, { command: e.target.value })}
+              value={a.install_command ?? ""}
+              placeholder="install command (optional), offered in the + menu when the agent is not found"
+              title="Runs in a terminal tab after you confirm it, when the agent's program is not found"
+              onChange={(e) => edit(i, { install_command: e.target.value })}
               onBlur={() => save(draft)}
             />
           </div>
-          <div className="w-52 shrink-0">
-            <input
-              className={`${inputClass} font-mono`}
-              value={a.bypass_args ?? ""}
-              placeholder="bypass flags (optional)"
-              title="Appended when you open the agent with bypass permissions"
-              onChange={(e) => edit(i, { bypass_args: e.target.value })}
-              onBlur={() => save(draft)}
-            />
-          </div>
-          <div className="w-36 shrink-0">
-            <input
-              className={`${inputClass} font-mono`}
-              value={a.resume_args ?? ""}
-              placeholder="resume args"
-              title="Used when a tab is restored after the app restarts, to continue the last conversation (e.g. --continue)"
-              onChange={(e) => edit(i, { resume_args: e.target.value })}
-              onBlur={() => save(draft)}
-            />
-          </div>
-          <IconButton title="Remove" onClick={() => save(draft.filter((_, j) => j !== i))}>
-            <Trash2 size={12} />
-          </IconButton>
         </div>
       ))}
       <Button
@@ -71,7 +90,15 @@ export function AgentCliSettings() {
         onClick={() =>
           save([
             ...draft,
-            { id: `custom-${Date.now().toString(36)}`, name: "New agent", command: "", enabled: true, bypass_args: null, resume_args: null },
+            {
+              id: `custom-${Date.now().toString(36)}`,
+              name: "New agent",
+              command: "",
+              enabled: true,
+              bypass_args: null,
+              resume_args: null,
+              install_command: null,
+            },
           ])
         }
       >
