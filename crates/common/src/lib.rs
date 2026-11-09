@@ -543,7 +543,7 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
         enabled: true,
         bypass_args: bypass.map(String::from),
         resume_args: resume.map(String::from),
-        install_command: default_install_command(id).map(String::from),
+        install_command: default_install_command(id),
     })
     .collect()
 }
@@ -551,26 +551,51 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
 /// The official installer of a preset agent CLI, for this platform. Terminal
 /// tabs run commands with `$SHELL -c` on macOS/Linux and PowerShell on
 /// Windows.
-pub fn default_install_command(id: &str) -> Option<&'static str> {
+pub fn default_install_command(id: &str) -> Option<String> {
+    let npm = |pkg: &str| Some(npm_global_install(pkg));
     let (unix, windows) = match id {
-        "claude" => ("curl -fsSL https://claude.ai/install.sh | bash", Some("irm https://claude.ai/install.ps1 | iex")),
-        "codex" => ("npm install -g @openai/codex", Some("npm install -g @openai/codex")),
-        "opencode" => ("npm install -g opencode-ai", Some("npm install -g opencode-ai")),
-        "antigravity" => (
-            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-            Some("irm https://antigravity.google/cli/install.ps1 | iex"),
+        "claude" => (
+            Some("curl -fsSL https://claude.ai/install.sh | bash".to_string()),
+            Some("irm https://claude.ai/install.ps1 | iex".to_string()),
         ),
-        "commandcode" => ("npm install -g command-code", Some("npm install -g command-code")),
-        "gemini" => ("npm install -g @google/gemini-cli", Some("npm install -g @google/gemini-cli")),
-        "goose" => ("curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash", None),
-        "aider" => ("curl -LsSf https://aider.chat/install.sh | sh", Some("irm https://aider.chat/install.ps1 | iex")),
+        "codex" => (npm("@openai/codex"), npm("@openai/codex")),
+        "opencode" => (npm("opencode-ai"), npm("opencode-ai")),
+        "antigravity" => (
+            Some("curl -fsSL https://antigravity.google/cli/install.sh | bash".to_string()),
+            Some("irm https://antigravity.google/cli/install.ps1 | iex".to_string()),
+        ),
+        "commandcode" => (npm("command-code"), npm("command-code")),
+        "gemini" => (npm("@google/gemini-cli"), npm("@google/gemini-cli")),
+        "goose" => (
+            Some("curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash".to_string()),
+            None,
+        ),
+        "aider" => (
+            Some("curl -LsSf https://aider.chat/install.sh | sh".to_string()),
+            Some("irm https://aider.chat/install.ps1 | iex".to_string()),
+        ),
         _ => return None,
     };
     if cfg!(windows) {
         windows
     } else {
-        Some(unix)
+        unix
     }
+}
+
+/// `npm install -g <pkg>`. On macOS/Linux npm's global folder often belongs
+/// to root (Node from the official installer or a distro package), where a
+/// plain install fails with EACCES; then it runs through `sudo`, which asks
+/// for the password in the tab. Wrapped in `sh -c` so it works whatever the
+/// user's shell is.
+pub fn npm_global_install(pkg: &str) -> String {
+    if cfg!(windows) {
+        return format!("npm install -g {pkg}");
+    }
+    format!(
+        "sh -c 'd=\"$(npm prefix -g)/lib\"; if [ -w \"$d/node_modules\" ] || {{ [ ! -e \"$d/node_modules\" ] && [ -w \"$d\" ]; }}; \
+         then npm install -g {pkg}; else echo \"npm needs administrator rights for $d: running sudo\"; sudo npm install -g {pkg}; fi'"
+    )
 }
 
 /// An installed skill, for the Skills settings and the `/` menu.

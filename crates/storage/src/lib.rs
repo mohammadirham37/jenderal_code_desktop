@@ -29,12 +29,15 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("016_commandcode_agent", include_str!("../migrations/016_commandcode_agent.sql")),
     ("017_commandcode_bin", include_str!("../migrations/017_commandcode_bin.sql")),
     ("018_agent_install_commands", include_str!("../migrations/018_agent_install_commands.sql")),
+    ("019_npm_install_sudo", include_str!("../migrations/019_npm_install_sudo.sql")),
 ];
 
 /// A migration's SQL with the platform-dependent placeholders filled in:
 /// `@COMMAND_CODE_BIN@` becomes [`jcode_common::COMMAND_CODE_BIN`] and
 /// `@AGENT_INSTALL_COMMANDS@` a `SELECT id, cmd` of the presets' installers
-/// ([`jcode_common::default_install_command`]).
+/// ([`jcode_common::default_install_command`]); `@NPM_INSTALL_UPGRADES@` a
+/// `SELECT old, new` from v0.1.16's plain `npm install -g <pkg>` to
+/// [`jcode_common::npm_global_install`].
 fn migration_sql(sql: &str) -> String {
     let quote = |v: &str| format!("'{}'", v.replace('\'', "''"));
     let installers = jcode_common::default_agent_clis()
@@ -42,8 +45,20 @@ fn migration_sql(sql: &str) -> String {
         .filter_map(|a| Some(format!("SELECT {} AS id, {} AS cmd", quote(&a.id), quote(a.install_command.as_deref()?))))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
+    let upgrades = ["@openai/codex", "opencode-ai", "command-code", "@google/gemini-cli"]
+        .iter()
+        .map(|pkg| {
+            format!(
+                "SELECT {} AS old, {} AS new",
+                quote(&format!("npm install -g {pkg}")),
+                quote(&jcode_common::npm_global_install(pkg))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
     sql.replace("@COMMAND_CODE_BIN@", jcode_common::COMMAND_CODE_BIN)
         .replace("@AGENT_INSTALL_COMMANDS@", &installers)
+        .replace("@NPM_INSTALL_UPGRADES@", &upgrades)
 }
 
 pub struct Db {
@@ -1474,10 +1489,33 @@ mod tests {
         }
         let agents = d.get_settings().unwrap().agent_clis;
         let install = |id: &str| agents.iter().find(|a| a.id == id).unwrap().install_command.clone();
-        assert_eq!(install("claude").as_deref(), jcode_common::default_install_command("claude"));
+        assert_eq!(install("claude"), jcode_common::default_install_command("claude"));
         assert_eq!(install("codex").as_deref(), Some("brew install codex"));
-        assert_eq!(install("commandcode").as_deref(), Some("npm install -g command-code"));
+        assert_eq!(install("commandcode"), Some(jcode_common::npm_global_install("command-code")));
         assert_eq!(agents.len(), settings.agent_clis.len(), "order and entries kept");
+    }
+
+    #[test]
+    fn plain_npm_installs_are_upgraded_to_the_sudo_fallback() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        let set = |s: &mut AppSettings, id: &str, v: &str| {
+            s.agent_clis.iter_mut().find(|a| a.id == id).unwrap().install_command = Some(v.into());
+        };
+        set(&mut settings, "commandcode", "npm install -g command-code"); // as written by 018 in v0.1.16
+        set(&mut settings, "codex", "brew install codex"); // the user's own
+        d.save_settings(&settings).unwrap();
+
+        let sql = migration_sql(include_str!("../migrations/019_npm_install_sudo.sql"));
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(&sql)?)).unwrap();
+        }
+        let agents = d.get_settings().unwrap().agent_clis;
+        let install = |id: &str| agents.iter().find(|a| a.id == id).unwrap().install_command.clone();
+        assert_eq!(install("commandcode"), Some(jcode_common::npm_global_install("command-code")));
+        assert_eq!(install("codex").as_deref(), Some("brew install codex"));
+        assert_eq!(install("claude"), jcode_common::default_install_command("claude"));
+        assert_eq!(agents.len(), settings.agent_clis.len());
     }
 
     #[test]
