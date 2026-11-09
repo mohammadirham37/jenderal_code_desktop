@@ -41,7 +41,7 @@ Dibangun sesuai *JenderalCode-Desktop-PRD.md* v1.0 (MVP).
 
 Kendalikan sesi dari HP Android: chat, approval, ganti agent/model/mode,
 Files, Editor, Changes, Git, Terminal, serta sesi agent CLI (Claude Code,
-Codex, OpenCode, Antigravity). Pesan terenkripsi end-to-end antara HP dan
+Codex, OpenCode, Antigravity, Command Code). Pesan terenkripsi end-to-end antara HP dan
 desktop; relay hanya meneruskan (`docs/REMOTE_PROTOCOL.md`).
 
 - Unduh app Android: <https://github.com/mohammadirham37/jenderalcode_mobile/releases/latest>

@@ -520,6 +520,8 @@ pub fn default_agent_clis() -> Vec<AgentCli> {
         ("codex", "Codex", "codex", Some("--dangerously-bypass-approvals-and-sandbox"), Some("resume --last")),
         ("opencode", "OpenCode", "opencode", Some("--auto"), Some("--continue")),
         ("antigravity", "Antigravity", "agy", Some("--dangerously-skip-permissions"), Some("--continue")),
+        // `commandcode`, not the short `cmd` alias, which is cmd.exe on Windows.
+        ("commandcode", "Command Code", "commandcode", Some("--yolo"), Some("--continue")),
         ("gemini", "Gemini", "gemini", None, None),
         ("goose", "Goose", "goose session", None, None),
         ("aider", "Aider", "aider", None, None),
@@ -786,7 +788,7 @@ mod tests {
         let s: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert_eq!(s.agent_clis, default_agent_clis());
         let ids: Vec<&str> = s.agent_clis.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "gemini", "goose", "aider"]);
+        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "commandcode", "gemini", "goose", "aider"]);
         assert!(s.agent_clis.iter().all(|a| a.enabled));
         let claude = &s.agent_clis[0];
         assert_eq!(claude.bypass_args.as_deref(), Some("--dangerously-skip-permissions"));

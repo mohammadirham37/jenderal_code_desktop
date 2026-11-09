@@ -26,6 +26,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("013_agent_resume_args", include_str!("../migrations/013_agent_resume_args.sql")),
     ("014_workspace_hidden", include_str!("../migrations/014_workspace_hidden.sql")),
     ("015_remote_peers", include_str!("../migrations/015_remote_peers.sql")),
+    ("016_commandcode_agent", include_str!("../migrations/016_commandcode_agent.sql")),
 ];
 
 pub struct Db {
@@ -1383,6 +1384,31 @@ mod tests {
     }
 
     #[test]
+    fn commandcode_agent_is_added_to_saved_agent_lists_once() {
+        let d = db();
+        let mut settings = d.get_settings().unwrap();
+        settings.agent_clis.retain(|a| a.id != "commandcode");
+        settings.agent_clis.truncate(4);
+        // The user's own edits are kept.
+        settings.agent_clis[0].enabled = false;
+        d.save_settings(&settings).unwrap();
+
+        let sql = include_str!("../migrations/016_commandcode_agent.sql");
+        for _ in 0..2 {
+            d.with_conn(|c| Ok(c.execute_batch(sql)?)).unwrap();
+        }
+        let agents = d.get_settings().unwrap().agent_clis;
+        let ids: Vec<&str> = agents.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "commandcode"]);
+        assert!(!agents[0].enabled);
+        let cc = &agents[4];
+        assert_eq!((cc.name.as_str(), cc.command.as_str()), ("Command Code", "commandcode"));
+        assert!(cc.enabled);
+        assert_eq!(cc.bypass_args.as_deref(), Some("--yolo"));
+        assert_eq!(cc.resume_args.as_deref(), Some("--continue"));
+    }
+
+    #[test]
     fn bypass_args_are_filled_into_saved_agent_lists() {
         let d = db();
         let mut settings = d.get_settings().unwrap();
@@ -1399,7 +1425,7 @@ mod tests {
         }
         let agents = d.get_settings().unwrap().agent_clis;
         let ids: Vec<&str> = agents.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "gemini", "goose", "aider"]);
+        assert_eq!(ids, ["claude", "codex", "opencode", "antigravity", "commandcode", "gemini", "goose", "aider"]);
         let bypass = |id: &str| agents.iter().find(|a| a.id == id).unwrap().bypass_args.clone();
         assert_eq!(bypass("claude").as_deref(), Some("--dangerously-skip-permissions"));
         assert_eq!(bypass("codex").as_deref(), Some("--full-auto"));
@@ -1430,7 +1456,7 @@ mod tests {
         assert_eq!(resume("opencode").as_deref(), Some("-s main"));
         assert_eq!(resume("antigravity").as_deref(), Some("--continue"));
         assert_eq!(resume("gemini"), None);
-        assert_eq!(agents.len(), 7, "order and entries kept");
+        assert_eq!(agents.len(), 8, "order and entries kept");
     }
 
     #[test]

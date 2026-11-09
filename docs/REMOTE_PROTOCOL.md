@@ -360,7 +360,7 @@ Semua method git memakai repo di root proyek; bukan repo → `bad_request`.
 Push/pull tidak tersedia dari ponsel (sama seperti desktop: operasi git remote
 selalu lewat terminal).
 
-### 6.9 Agent CLI (Claude Code, Codex, OpenCode, Antigravity, …)
+### 6.9 Agent CLI (Claude Code, Codex, OpenCode, Antigravity, Command Code, …)
 
 Preset agent CLI diambil dari pengaturan desktop (Settings → Agent CLIs), sama
 dengan menu "+" di tab tengah desktop. Sesi agent CLI adalah terminal yang
