@@ -1,13 +1,13 @@
 /** Workspace shell: title bar with the Code/Chat layout switch, then either
- *  the IDE layout (explorer | editor + bottom panel | chat) or the
- *  chat-first layout. */
+ *  the IDE layout (explorer | editor + bottom panel | chat with agent-CLI
+ *  tabs) or the chat-first layout. */
 import { RemoteBadge } from "@/components/RemoteBadge";
 import { useState } from "react";
 import { Code2, GitBranch, Globe, MessagesSquare, PanelBottom, PanelBottomClose, Terminal as TerminalIcon } from "lucide-react";
 import { BrowserPanel } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
-import { ChatPanel } from "@/features/chat/ChatPanel";
 import { ChatLayout } from "./ChatLayout";
+import { CenterColumn } from "./CenterColumn";
 import { LazyEditorPane, LazyGitPanel, LazyTerminalPanel, PanelSuspense } from "./lazy";
 import { useResizable } from "./useResizable";
 import { useApp, type LayoutMode } from "@/stores/app";
@@ -158,7 +158,7 @@ function CodeLayout() {
 
       <div {...chat.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
       <div style={{ width: chat.size }} className="min-h-0 shrink-0 border-l border-neutral-200 dark:border-neutral-800">
-        <ChatPanel variant="side" />
+        <CenterColumn chatVariant="side" />
       </div>
     </div>
   );

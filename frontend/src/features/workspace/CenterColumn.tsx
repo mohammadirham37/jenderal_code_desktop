@@ -1,5 +1,8 @@
-/** Chat layout centre column: the built-in Chat tab plus terminal and
- *  agent-CLI tabs opened from the "+" menu. */
+/** Centre column: the built-in Chat tab plus terminal and agent-CLI tabs
+ *  opened from the "+" menu. The Chat layout shows it in the middle
+ *  (`chatVariant="full"`); the Code layout shows it as the chat side panel
+ *  (`chatVariant="side"`). Both read the same `useCenterTabs` store, so the
+ *  tabs and the active tab carry over when the layout is switched. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Bot, Download, MessageSquare, Plus, RotateCcw, Settings, ShieldOff, Smartphone, Terminal as TerminalIcon, X } from "lucide-react";
@@ -11,7 +14,15 @@ import { LazyXtermView, PanelSuspense } from "./lazy";
 import { AgentUsageButton } from "./AgentUsage";
 import { confirmAction } from "@/lib/confirm";
 
-export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trailing?: ReactNode }) {
+export function CenterColumn({
+  leading,
+  trailing,
+  chatVariant = "full",
+}: {
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  chatVariant?: "full" | "side";
+}) {
   const { tabs, activeId } = useCenterTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId })));
   const showChat = activeId === CHAT_TAB;
   useNewTerminalShortcut();
@@ -58,12 +69,12 @@ export function CenterColumn({ leading, trailing }: { leading?: ReactNode; trail
           ))}
         </div>
         <NewTabMenu />
-        <AgentUsageButton />
+        <AgentUsageButton align={chatVariant === "side" ? "right" : "left"} />
         <div className="ml-auto flex items-center">{trailing}</div>
       </div>
       <div className="relative min-h-0 flex-1">
         <div className={`absolute inset-0 ${showChat ? "block" : "hidden"}`}>
-          <ChatPanel variant="full" />
+          <ChatPanel variant={chatVariant} />
         </div>
         {tabs.length > 0 && (
           <div className={`absolute inset-0 bg-neutral-50 text-neutral-800 dark:bg-neutral-950 dark:text-neutral-200 ${showChat ? "hidden" : "block"}`}>

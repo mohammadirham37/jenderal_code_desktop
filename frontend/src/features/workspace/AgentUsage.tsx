@@ -20,7 +20,9 @@ const STATUS_LABEL: Record<AgentUsageStatus, string | null> = {
   error: "Error",
 };
 
-export function AgentUsageButton() {
+/** `align="right"` opens the popover leftwards, for the narrow chat panel at
+ *  the window's right edge (Code layout). */
+export function AgentUsageButton({ align = "left" }: { align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const [reports, setReports] = useState<AgentUsageReport[] | null>(cache?.reports ?? null);
   const [loading, setLoading] = useState(false);
@@ -74,7 +76,7 @@ export function AgentUsageButton() {
         Usage
       </button>
       {open && (
-        <div className="animate-rise absolute left-0 top-full z-30 mt-1 w-80 rounded-[6px] border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
+        <div className={`animate-rise absolute ${align === "right" ? "right-0" : "left-0"} top-full z-30 mt-1 w-80 rounded-[6px] border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900`}>
           <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
             <span className="eyebrow">Agent usage</span>
             <IconButton title="Refresh" className="h-6 w-6" disabled={loading} onClick={() => void load()}>
