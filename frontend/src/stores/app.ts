@@ -63,9 +63,10 @@ const LAST_WORKSPACE_KEY = "jcode:last-workspace";
 
 const removedListeners = new Set<(workspaceId: string) => void>();
 /** Run `f` when a project is removed from the list (e.g. to stop its
- *  terminals, which can no longer be reached). */
-export function onWorkspaceRemoved(f: (workspaceId: string) => void) {
+ *  terminals, which can no longer be reached). Returns the unsubscribe. */
+export function onWorkspaceRemoved(f: (workspaceId: string) => void): () => void {
   removedListeners.add(f);
+  return () => removedListeners.delete(f);
 }
 
 export const useApp = create<AppState>((set, get) => ({

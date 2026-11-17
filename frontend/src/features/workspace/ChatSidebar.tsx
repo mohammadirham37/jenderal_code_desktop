@@ -40,7 +40,7 @@ export function ChatSidebar() {
   );
 }
 
-/** Recently opened projects, newest first; the active one is marked. */
+/** Opened projects, sorted by name; the active one is marked. */
 function ProjectList() {
   const { workspace, recent } = useApp(useShallow((s) => ({ workspace: s.workspace, recent: s.recent })));
   const [switching, setSwitching] = useState<string | null>(null);
@@ -64,7 +64,11 @@ function ProjectList() {
     if (isOpen) await useApp.getState().closeWorkspace();
     await useApp.getState().removeRecent(w.id);
   };
-  const projects = useMemo(() => [...recent].sort((a, b) => b.last_opened_at - a.last_opened_at), [recent]);
+  // By name, so the list stays put when a project is opened.
+  const projects = useMemo(
+    () => [...recent].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })),
+    [recent],
+  );
 
   const open = async (w: WorkspaceInfo) => {
     if (w.id === workspace?.id || switching) return;

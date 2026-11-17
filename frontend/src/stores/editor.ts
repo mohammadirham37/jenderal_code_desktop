@@ -1,6 +1,9 @@
-/** Editor tabs: files and diff views in the center pane. */
+/** Editor tabs: files and diff views. Each project has its own: switching
+ *  projects parks the open tabs (unsaved edits included), the expanded
+ *  folders and language overrides, and brings back the other project's. */
 import { create } from "zustand";
 import { api } from "@/lib/ipc";
+import { onWorkspaceRemoved, useApp } from "./app";
 
 export interface FileTab {
   kind: "file";
@@ -60,7 +63,14 @@ export const useEditor = create<EditorState>((set, get) => ({
       set((s) => ({ activeKey: key, revealTick: s.revealTick + 1 }));
       return;
     }
+    const ws = currentWorkspace();
     const res = await api.fsRead(path);
+    // The project changed while reading: the file belongs to the old one.
+    if (currentWorkspace() !== ws) return;
+    if (get().tabs.some((t) => t.kind === "file" && t.path === path)) {
+      set((s) => ({ activeKey: key, revealTick: s.revealTick + 1 }));
+      return;
+    }
     set((s) => ({
       revealTick: s.revealTick + 1,
       tabs: [
@@ -105,7 +115,13 @@ export const useEditor = create<EditorState>((set, get) => ({
   save: async (path) => {
     const tab = get().tabs.find((t) => t.kind === "file" && t.path === path);
     if (!tab || tab.kind !== "file") return;
+    const ws = currentWorkspace();
     await api.fsWrite(path, tab.content);
+    if (currentWorkspace() !== ws) {
+      const p = parked[ws ?? ""];
+      if (p) p.tabs = p.tabs.map((t) => (t.kind === "file" && t.path === path ? { ...t, original: tab.content, dirty: t.content !== tab.content } : t));
+      return;
+    }
     set((s) => ({
       tabs: s.tabs.map((t) =>
         t.kind === "file" && t.path === path ? { ...t, original: t.content, dirty: false } : t,
@@ -134,7 +150,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!tab || tab.kind !== "file") return;
     if (tab.dirty) return; // do not clobber unsaved user edits
     try {
+      const ws = currentWorkspace();
       const res = await api.fsRead(path);
+      if (currentWorkspace() !== ws) return;
       set((s) => ({
         tabs: s.tabs.map((t) =>
           t.kind === "file" && t.path === path
@@ -160,3 +178,44 @@ export const useEditor = create<EditorState>((set, get) => ({
 function keyOf(t: Tab): string {
   return t.kind === "file" ? fileKey(t.path) : t.key;
 }
+
+function currentWorkspace(): string | null {
+  return useApp.getState().workspace?.id ?? null;
+}
+
+interface ParkedEditor {
+  tabs: Tab[];
+  activeKey: string | null;
+  expandedDirs: Set<string>;
+  langOverrides: Record<string, string>;
+}
+
+/** Editor state of the projects that are not shown, by workspace id. */
+const parked: Record<string, ParkedEditor> = {};
+
+useApp.subscribe((s, prev) => {
+  const from = prev.workspace?.id ?? null;
+  const to = s.workspace?.id ?? null;
+  if (from === to) return;
+  const cur = useEditor.getState();
+  if (from) {
+    parked[from] = {
+      tabs: cur.tabs,
+      activeKey: cur.activeKey,
+      expandedDirs: cur.expandedDirs,
+      langOverrides: cur.langOverrides,
+    };
+  }
+  const next = to ? parked[to] : undefined;
+  if (to) delete parked[to];
+  useEditor.setState({
+    tabs: next?.tabs ?? [],
+    activeKey: next?.activeKey ?? null,
+    expandedDirs: next?.expandedDirs ?? new Set<string>(),
+    langOverrides: next?.langOverrides ?? {},
+  });
+});
+
+onWorkspaceRemoved((id) => {
+  delete parked[id];
+});

@@ -2,6 +2,7 @@
  *  by the backend; this component renders the toolbar and a placeholder
  *  whose on-screen rectangle the webview is kept glued to. */
 import { useEffect, useRef, useState } from "react";
+import { onWorkspaceRemoved } from "@/stores/app";
 import { ArrowLeft, ArrowRight, Copy, Globe, Loader2, RotateCw, X } from "lucide-react";
 import { api, events } from "@/lib/ipc";
 import { useApp } from "@/stores/app";
@@ -9,9 +10,33 @@ import { IconButton } from "@/components/ui";
 
 const QUICK = ["localhost:3000", "localhost:5173", "localhost:8000", "localhost:8080"];
 
-/** `id` must be unique per mounted panel (one per layout). */
-export function BrowserPanel({ id }: { id: string }) {
-  const workspaceId = useApp((s) => s.workspace?.id ?? "none");
+/** One preview per project: each project's panel stays mounted (hidden) while
+ *  another project is shown, so its page keeps its state. `prefix` must be
+ *  unique per layout. */
+export function ProjectBrowsers({ prefix }: { prefix: string }) {
+  const current = useApp((s) => s.workspace?.id ?? null);
+  const [seen, setSeen] = useState<string[]>([]);
+  useEffect(() => {
+    if (current && !seen.includes(current)) setSeen((s) => (s.includes(current) ? s : [...s, current]));
+  }, [current, seen]);
+  useEffect(() => {
+    const off = onWorkspaceRemoved((ws) => setSeen((s) => s.filter((x) => x !== ws)));
+    return () => void off();
+  }, []);
+  const shown = current && !seen.includes(current) ? [...seen, current] : seen;
+  return (
+    <>
+      {shown.map((ws) => (
+        <div key={ws} className={`absolute inset-0 ${ws === current ? "block" : "hidden"}`}>
+          <BrowserPanel id={`${prefix}-${ws}`} workspaceId={ws} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** `id` must be unique per mounted panel. */
+export function BrowserPanel({ id, workspaceId }: { id: string; workspaceId: string }) {
   const storageKey = `jcode:browser-url:${workspaceId}`;
   const hostRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,18 +111,18 @@ export function BrowserPanel({ id }: { id: string }) {
     return () => cancelAnimationFrame(frame);
   }, [id]);
 
-  // Reopen the last previewed URL for this project once the panel is laid out.
+  // Reopen the last previewed URL for this project once the panel is laid
+  // out (it may start hidden, e.g. mounted for a project shown elsewhere).
   useEffect(() => {
     const saved = localStorage.getItem(storageKey);
     if (!saved) return;
-    let tries = 0;
     const t = setInterval(() => {
-      if (openRef.current || ++tries > 40) return clearInterval(t);
+      if (openRef.current) return clearInterval(t);
       if (boundsOf()) {
         clearInterval(t);
         void open(saved);
       }
-    }, 50);
+    }, 100);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);

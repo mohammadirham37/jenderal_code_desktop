@@ -14,13 +14,14 @@ import {
   PanelRightOpen,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { BrowserPanel } from "@/features/browser/BrowserPanel";
+import { ProjectBrowsers } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
 import { ChangesPanel } from "./ChangesPanel";
 import { CenterColumn } from "./CenterColumn";
 import { ChatSidebar } from "./ChatSidebar";
 import { LazyEditorPane, LazyGitPanel, LazyTerminalPanel, PanelSuspense } from "./lazy";
 import { useEditor } from "@/stores/editor";
+import { useApp } from "@/stores/app";
 import { IconButton } from "@/components/ui";
 import { useResizable } from "./useResizable";
 
@@ -41,7 +42,11 @@ const SIDEBAR_OPEN_KEY = "jcode:chat-sidebar-open";
 export function ChatLayout() {
   const [contextOpen, setContextOpen] = useState(() => localStorage.getItem(PANEL_OPEN_KEY) !== "0");
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0");
-  const [tab, setTab] = useState<ContextTab>("changes");
+  // Each project remembers its own context tab.
+  const wsId = useApp((s) => s.workspace?.id ?? "");
+  const [tabByProject, setTabByProject] = useState<Record<string, ContextTab>>({});
+  const tab = tabByProject[wsId] ?? "changes";
+  const setTab = (t: ContextTab) => setTabByProject((m) => ({ ...m, [wsId]: t }));
   // Panels are mounted on first visit and then kept alive (hidden), so the
   // terminal's shell sessions survive tab switches.
   const [visited, setVisited] = useState<Set<ContextTab>>(() => new Set(["changes"]));
@@ -53,6 +58,10 @@ export function ChatLayout() {
     setVisited((v) => (v.has(t) ? v : new Set(v).add(t)));
     setContextOpen(true);
   };
+  // A project's remembered tab may not have been mounted yet.
+  useEffect(() => {
+    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
+  }, [tab]);
 
   useEffect(() => {
     localStorage.setItem(PANEL_OPEN_KEY, contextOpen ? "1" : "0");
@@ -62,7 +71,8 @@ export function ChatLayout() {
   }, [sidebarOpen]);
 
   // Opening a file or diff from the chat (or explorer) reveals the editor.
-  const activeKey = useEditor((s) => s.activeKey);
+  // Only an open (revealTick) counts: switching projects restores that
+  // project's editor tabs without jumping to the editor.
   const revealTick = useEditor((s) => s.revealTick);
   const firstRender = useRef(true);
   useEffect(() => {
@@ -70,8 +80,8 @@ export function ChatLayout() {
       firstRender.current = false;
       return;
     }
-    if (activeKey) showTab("editor");
-  }, [activeKey, revealTick]);
+    if (useEditor.getState().activeKey) showTab("editor");
+  }, [revealTick]);
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -134,12 +144,12 @@ export function ChatLayout() {
           {[...visited].map((t) => (
             <div key={t} className={`absolute inset-0 ${t === tab ? "block" : "hidden"}`}>
               <PanelSuspense>
-                {t === "changes" && <ChangesPanel onOpen={() => showTab("editor")} />}
-                {t === "files" && <FileExplorer />}
+                {t === "changes" && <ChangesPanel key={wsId} onOpen={() => showTab("editor")} />}
+                {t === "files" && <FileExplorer key={wsId} />}
                 {t === "editor" && <LazyEditorPane />}
-                {t === "browser" && <BrowserPanel id="chat" />}
-                {t === "terminal" && <LazyTerminalPanel />}
-                {t === "git" && <LazyGitPanel />}
+                {t === "browser" && <ProjectBrowsers prefix="chat" />}
+                {t === "terminal" && <LazyTerminalPanel visible={contextOpen && tab === "terminal"} />}
+                {t === "git" && <LazyGitPanel key={wsId} />}
               </PanelSuspense>
             </div>
           ))}

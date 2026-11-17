@@ -1,68 +1,26 @@
-/** Interactive terminal panel backed by a backend PTY. */
-import { useEffect, useRef, useState } from "react";
+/** Interactive terminal panel backed by backend PTYs: the open project's
+ *  shells (`panelTerminals.ts`; each project has its own). */
+import { useEffect } from "react";
 import { Plus, X } from "lucide-react";
-import { api } from "@/lib/ipc";
 import { useApp } from "@/stores/app";
 import { IconButton } from "@/components/ui";
 import { XtermView } from "./XtermView";
-import { disposeXterm, ensureXterm, newTerminalId } from "./xtermRegistry";
+import { usePanelTerminals, type ProjectTerminals } from "./panelTerminals";
 
-interface TermTab {
-  id: string;
-  title: string;
-}
+const NONE: ProjectTerminals = { tabs: [], activeId: null, next: 1 };
 
-export function TerminalPanel() {
-  const [tabs, setTabs] = useState<TermTab[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const tabsRef = useRef<TermTab[]>([]);
-  tabsRef.current = tabs;
-  const creatingRef = useRef(false);
+/** `visible`: the panel is on screen; the first shell of a project is
+ *  started only then. */
+export function TerminalPanel({ visible }: { visible: boolean }) {
+  const ws = useApp((s) => s.workspace?.id ?? null);
+  const project = usePanelTerminals((s) => (ws ? s.byWorkspace[ws] : undefined)) ?? NONE;
+  const { create, close, setActive } = usePanelTerminals.getState();
+  const { tabs, activeId } = project;
 
-  const newTerminal = async () => {
-    if (creatingRef.current) return;
-    creatingRef.current = true;
-    const id = newTerminalId();
-    try {
-      ensureXterm(id, useApp.getState().settings.terminal_font_size);
-      const title = `shell ${tabs.length + 1}`;
-      await api.terminalCreate(id, 80, 24, undefined, title);
-      setTabs((t) => [...t, { id, title }]);
-      setActiveId(id);
-    } catch (e) {
-      disposeXterm(id);
-      throw e;
-    } finally {
-      creatingRef.current = false;
-    }
-  };
-
-  const closeTerminal = async (id: string) => {
-    await api.terminalKill(id);
-    disposeXterm(id);
-    setTabs((t) => {
-      const next = t.filter((x) => x.id !== id);
-      setActiveId(next.length ? next[next.length - 1].id : null);
-      return next;
-    });
-  };
-
-  // Auto-create the first terminal tab.
+  // Start the project's first shell (again after the last one is closed).
   useEffect(() => {
-    if (tabs.length === 0) void newTerminal();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabs.length === 0]);
-
-  // Kill this panel's shells on unmount, so PTYs don't leak when the panel
-  // goes away.
-  useEffect(() => {
-    return () => {
-      for (const t of tabsRef.current) {
-        void api.terminalKill(t.id).catch(() => {});
-        disposeXterm(t.id);
-      }
-    };
-  }, []);
+    if (visible && ws && tabs.length === 0) void create(ws);
+  }, [visible, ws, tabs.length, create]);
 
   return (
     <div className="flex h-full flex-col">
@@ -70,7 +28,7 @@ export function TerminalPanel() {
         {tabs.map((t) => (
           <div
             key={t.id}
-            onClick={() => setActiveId(t.id)}
+            onClick={() => ws && setActive(ws, t.id)}
             className={`flex cursor-pointer items-center gap-1 px-3 text-[11px] ${
               activeId === t.id
                 ? "border-b-2 border-b-accent-500 font-medium"
@@ -82,14 +40,14 @@ export function TerminalPanel() {
               className="rounded p-0.5 hover:bg-neutral-300/60 dark:hover:bg-neutral-700"
               onClick={(e) => {
                 e.stopPropagation();
-                void closeTerminal(t.id);
+                if (ws) void close(ws, t.id);
               }}
             >
               <X size={10} />
             </button>
           </div>
         ))}
-        <IconButton title="New terminal" className="ml-1 h-6 w-6" onClick={() => void newTerminal()}>
+        <IconButton title="New terminal" className="ml-1 h-6 w-6" onClick={() => ws && void create(ws)}>
           <Plus size={12} />
         </IconButton>
       </div>

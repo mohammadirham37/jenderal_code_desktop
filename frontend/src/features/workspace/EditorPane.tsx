@@ -112,6 +112,7 @@ function langExtension(lang: string): import("@codemirror/state").Extension[] {
 
 export function EditorPane() {
   const { tabs, activeKey, setActive, closeTab, update, langOverrides, setLanguage } = useEditor();
+  const workspaceId = useApp((s) => s.workspace?.id ?? "");
   const fontSize = useApp((s) => s.settings.editor_font_size);
   const theme = useApp((s) => s.settings.theme);
   const wordWrap = useApp((s) => s.settings.editor_word_wrap);
@@ -230,7 +231,7 @@ export function EditorPane() {
         {active?.kind === "file" && (
           <div className="absolute inset-0 overflow-hidden">
             <CodeMirror
-              key={active.path}
+              key={`${workspaceId}:${active.path}`}
               value={active.content}
               height="100%"
               className="h-full w-full"

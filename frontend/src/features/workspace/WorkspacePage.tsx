@@ -4,7 +4,7 @@
 import { RemoteBadge } from "@/components/RemoteBadge";
 import { useState } from "react";
 import { Code2, GitBranch, Globe, MessagesSquare, PanelBottom, PanelBottomClose, Terminal as TerminalIcon } from "lucide-react";
-import { BrowserPanel } from "@/features/browser/BrowserPanel";
+import { ProjectBrowsers } from "@/features/browser/BrowserPanel";
 import { FileExplorer } from "./FileExplorer";
 import { ChatLayout } from "./ChatLayout";
 import { CenterColumn } from "./CenterColumn";
@@ -75,6 +75,7 @@ function LayoutSwitch() {
 type BottomTab = "terminal" | "git" | "browser";
 
 function CodeLayout() {
+  const wsId = useApp((s) => s.workspace?.id ?? "");
   const [bottomTab, setBottomTab] = useState<BottomTab>("terminal");
   const [bottomOpen, setBottomOpen] = useState(true);
   // Mount each bottom tab on first use, then keep it alive so terminal
@@ -100,7 +101,7 @@ function CodeLayout() {
   return (
     <div className="flex min-h-0 flex-1">
       <div style={{ width: explorer.size }} className="min-h-0 shrink-0 border-r border-neutral-200 dark:border-neutral-800">
-        <FileExplorer />
+        <FileExplorer key={wsId} />
       </div>
       <div {...explorer.handleProps} className="w-1 shrink-0 cursor-col-resize hover:bg-accent-500/40" />
 
@@ -133,9 +134,9 @@ function CodeLayout() {
             {[...visited].map((t) => (
               <div key={t} className={`absolute inset-0 ${t === bottomTab ? "block" : "hidden"}`}>
                 <PanelSuspense>
-                  {t === "terminal" && <LazyTerminalPanel />}
-                  {t === "git" && <LazyGitPanel />}
-                  {t === "browser" && <BrowserPanel id="code" />}
+                  {t === "terminal" && <LazyTerminalPanel visible={bottomOpen && bottomTab === "terminal"} />}
+                  {t === "git" && <LazyGitPanel key={wsId} />}
+                  {t === "browser" && <ProjectBrowsers prefix="code" />}
                 </PanelSuspense>
               </div>
             ))}
