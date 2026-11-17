@@ -45,13 +45,17 @@ fn parse_output(output: &str, len: usize) -> Vec<bool> {
 pub fn detect(commands: &[String]) -> Vec<bool> {
     let names: Vec<Option<&str>> = commands.iter().map(|c| program_name(c)).collect();
     if cfg!(windows) {
+        // Read again each time: an agent installed from its install tab
+        // must count without restarting the app.
+        let path = jcode_tool_terminal::user_path::fresh_windows_path()
+            .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
         return names
             .iter()
             .map(|n| {
                 n.is_some_and(|n| {
                     ["", ".exe", ".cmd", ".bat"]
                         .iter()
-                        .any(|ext| crate::terminal::which(&format!("{n}{ext}")).is_some())
+                        .any(|ext| crate::terminal::which_in(&format!("{n}{ext}"), &path).is_some())
                 })
             })
             .collect();

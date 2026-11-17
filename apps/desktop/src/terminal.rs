@@ -164,7 +164,11 @@ fn build_command(command: Option<&str>) -> CommandBuilder {
 }
 
 pub(crate) fn which(prog: &str) -> Option<String> {
-    let path = std::env::var("PATH").unwrap_or_default();
+    which_in(prog, &std::env::var("PATH").unwrap_or_default())
+}
+
+/// `prog` in the directories of `path` (a PATH value).
+pub(crate) fn which_in(prog: &str, path: &str) -> Option<String> {
     for dir in path.split(if cfg!(windows) { ';' } else { ':' }) {
         let candidate = Path::new(dir).join(prog);
         if candidate.is_file() {
@@ -226,6 +230,11 @@ impl TerminalManager {
 
         let mut cmd = build_command(command);
         cmd.cwd(cwd);
+        // Windows: the PATH of a new terminal, so programs installed while
+        // the app runs (e.g. from an agent's install tab) are found.
+        if let Some(path) = jcode_tool_terminal::user_path::fresh_windows_path() {
+            cmd.env("PATH", path);
+        }
         // Apps launched from Finder/launchd inherit an environment WITHOUT
         // TERM. Without a terminal description the shell cannot move the
         // cursor left, so Backspace echoes a space and the cursor moves

@@ -77,6 +77,96 @@ fn login_shell_path() -> Option<String> {
     parse_marked_path(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// Windows: the PATH a newly opened terminal would get, read from the
+/// registry (machine, then user `Path`, `%VAR%`s expanded) and followed by
+/// process entries it lacks. A running app keeps the PATH it started with,
+/// so without this a tool installed meanwhile (Node.js, an agent CLI via
+/// npm or winget) stays "not installed" until the app restarts. `None`
+/// elsewhere or when the registry cannot be read.
+pub fn fresh_windows_path() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let machine = reg_query(r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+        let user = reg_query(r"HKCU\Environment");
+        if machine.is_none() && user.is_none() {
+            return None;
+        }
+        let current = std::env::var("PATH").unwrap_or_default();
+        let fresh = [machine, user].into_iter().flatten().collect::<Vec<_>>().join(";");
+        Some(merge_windows_paths(&expand_env_vars(&fresh, |k| std::env::var(k).ok()), &current))
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+#[cfg(windows)]
+fn reg_query(key: &str) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = Command::new("reg")
+        .args(["query", key, "/v", "Path"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    parse_reg_path(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The value of `reg query <key> /v Path`:
+/// `    Path    REG_EXPAND_SZ    C:\a;%USERPROFILE%\b`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn parse_reg_path(output: &str) -> Option<String> {
+    output.lines().find_map(|l| {
+        let l = l.trim_start();
+        let rest = l.strip_prefix("Path").or_else(|| l.strip_prefix("PATH"))?;
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix("REG_EXPAND_SZ").or_else(|| rest.strip_prefix("REG_SZ"))?;
+        let v = rest.trim();
+        (!v.is_empty()).then(|| v.to_string())
+    })
+}
+
+/// `%NAME%` replaced by `var(NAME)`; unknown names are left as they are.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn expand_env_vars(s: &str, var: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find('%') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        match after.find('%') {
+            Some(j) if j > 0 && !after[..j].contains(';') => {
+                match var(&after[..j]) {
+                    Some(v) => out.push_str(&v),
+                    None => out.push_str(&rest[i..i + j + 2]),
+                }
+                rest = &after[j + 1..];
+            }
+            _ => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Like [`merge_paths`] for `;`-separated Windows paths, comparing entries
+/// without case or a trailing backslash.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn merge_windows_paths(fresh: &str, current: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    fresh
+        .split(';')
+        .chain(current.split(';'))
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && seen.insert(p.trim_end_matches('\\').to_lowercase()))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 /// The PATH printed between the markers; anything the profile prints
 /// around it is ignored.
 fn parse_marked_path(output: &str) -> Option<String> {
@@ -122,6 +212,31 @@ mod tests {
         assert_eq!(
             merge_paths("/opt/homebrew/bin:/usr/bin", "/usr/bin:/bin::/usr/bin"),
             "/opt/homebrew/bin:/usr/bin:/bin"
+        );
+    }
+
+    #[test]
+    fn reads_the_windows_registry_path() {
+        let out = "\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    %USERPROFILE%\\AppData\\Roaming\\npm;C:\\x\r\n\r\n";
+        assert_eq!(parse_reg_path(out).as_deref(), Some("%USERPROFILE%\\AppData\\Roaming\\npm;C:\\x"));
+        assert_eq!(parse_reg_path("    Path    REG_SZ    C:\\a").as_deref(), Some("C:\\a"));
+        assert_eq!(parse_reg_path("ERROR: not found"), None);
+    }
+
+    #[test]
+    fn expands_known_variables_only() {
+        let var = |k: &str| (k == "USERPROFILE").then(|| "C:\\Users\\me".to_string());
+        assert_eq!(
+            expand_env_vars("%USERPROFILE%\\npm;%NOPE%\\x;50%;%", var),
+            "C:\\Users\\me\\npm;%NOPE%\\x;50%;%"
+        );
+    }
+
+    #[test]
+    fn windows_merge_ignores_case_and_trailing_backslash() {
+        assert_eq!(
+            merge_windows_paths("C:\\Program Files\\nodejs\\;C:\\Windows", "c:\\windows;D:\\old;;"),
+            "C:\\Program Files\\nodejs\\;C:\\Windows;D:\\old"
         );
     }
 

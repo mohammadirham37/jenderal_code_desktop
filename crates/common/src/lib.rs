@@ -583,17 +583,32 @@ pub fn default_install_command(id: &str) -> Option<String> {
     }
 }
 
-/// `npm install -g <pkg>`. On macOS/Linux npm's global folder often belongs
-/// to root (Node from the official installer or a distro package), where a
-/// plain install fails with EACCES; then it runs through `sudo`, which asks
-/// for the password in the tab. Wrapped in `sh -c` so it works whatever the
-/// user's shell is.
+/// `npm install -g <pkg>`, getting Node.js first when npm is missing:
+/// Windows (PowerShell) installs Node.js LTS with winget and reloads PATH
+/// (and calls `npm.cmd`, which the execution policy cannot block like
+/// `npm.ps1`); macOS/Linux use Homebrew when present, otherwise point to
+/// nodejs.org. On macOS/Linux npm's global folder often belongs to root
+/// (Node from the official installer or a distro package), where a plain
+/// install fails with EACCES; then it runs through `sudo`, which asks for
+/// the password in the tab. Wrapped in `sh -c` so it works whatever the
+/// user's shell is. Older forms are in `storage::legacy_npm_installs`.
 pub fn npm_global_install(pkg: &str) -> String {
     if cfg!(windows) {
-        return format!("npm install -g {pkg}");
+        return format!(
+            "if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {{ \
+             if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {{ \
+             Write-Host 'npm not found: install Node.js LTS from https://nodejs.org, then press install again'; exit 1 }}; \
+             Write-Host 'npm not found: installing Node.js LTS with winget'; \
+             winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements; \
+             $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') }}; \
+             npm.cmd install -g {pkg}"
+        );
     }
     format!(
-        "sh -c 'd=\"$(npm prefix -g)/lib\"; if [ -w \"$d/node_modules\" ] || {{ [ ! -e \"$d/node_modules\" ] && [ -w \"$d\" ]; }}; \
+        "sh -c 'if ! command -v npm >/dev/null 2>&1; then \
+         if command -v brew >/dev/null 2>&1; then echo \"npm not found: installing Node.js with Homebrew\"; brew install node || exit 1; \
+         else echo \"npm not found: install Node.js 22 or newer from https://nodejs.org, then press install again\"; exit 1; fi; fi; \
+         d=\"$(npm prefix -g)/lib\"; if [ -w \"$d/node_modules\" ] || {{ [ ! -e \"$d/node_modules\" ] && [ -w \"$d\" ]; }}; \
          then npm install -g {pkg}; else echo \"npm needs administrator rights for $d: running sudo\"; sudo npm install -g {pkg}; fi'"
     )
 }

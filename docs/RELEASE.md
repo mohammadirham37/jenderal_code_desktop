@@ -10,14 +10,15 @@ Detail mesin build disimpan di catatan pribadi maintainer, bukan di repo.
 
 | OS | Bundle | Dibangun di |
 |----|--------|-------------|
-| macOS (Apple Silicon + Intel) | `.app`, `.dmg` (universal) | Mac |
+| macOS (Apple Silicon + Intel) | `.app`, `.dmg` (universal) | GitHub Actions `macos-14` (cadangan: Mac) |
 | Linux x86_64 | `.deb`, `.rpm`, `.AppImage` | GitHub Actions (cadangan: Docker) |
 | Windows x86_64 | installer NSIS `.exe` | GitHub Actions (cadangan: Docker, cross-compile `cargo-xwin`) |
 
-Bundle macOS tidak bisa dibangun di Linux. Bundle Linux dan Windows dibangun
-otomatis oleh `.github/workflows/release.yml` di runner asli begitu tag
-`vX.Y.Z` di-push (oleh `publish.sh`); Docker (`scripts/release/`) hanya
-cadangan.
+Semua bundle dibangun oleh `.github/workflows/release.yml` di runner asli
+begitu tag `vX.Y.Z` di-push (oleh `scripts/release/tag.sh`); tidak ada build
+di laptop. Rilis GitHub baru dibuat setelah ketiga OS selesai, lengkap
+dengan `latest.json` dan `SHA256SUMS`. Build Mac lokal (`build-macos.sh` +
+`publish.sh`) dan Docker (`build-linux-windows.sh`) hanya cadangan.
 
 ## 1. Persiapan versi
 
@@ -33,7 +34,7 @@ cadangan.
    ```
    Skrip ini mengubah `Cargo.toml` (`[workspace.package] version`),
    `apps/desktop/tauri.conf.json`, `frontend/package.json` dan kedua lockfile.
-3. Commit (`Release vX.Y.Z`). Tag `vX.Y.Z` dibuat oleh `publish.sh`.
+3. Commit (`Release vX.Y.Z`). Tag `vX.Y.Z` dibuat oleh `tag.sh` (langkah 4).
 
 ## Update otomatis (OTA)
 
@@ -66,17 +67,18 @@ cocok dengan `pubkey` di `tauri.conf.json`.
   Windows installer NSIS `-setup.exe`. Masing-masing punya `.sig`, yang
   isinya masuk ke `latest.json` (file `.sig` sendiri tidak diunggah).
 
-## 2. Linux dan Windows
+## 2. Build: GitHub Actions
 
-### Otomatis: GitHub Actions
-
-Workflow `Release (Linux, Windows)` jalan saat tag `v*` di-push: membangun
-AppImage/deb/rpm (ubuntu-22.04) dan installer NSIS (windows-latest),
-menandatangani bundle update dengan secret repo `TAURI_SIGNING_PRIVATE_KEY`,
-menunggu rilis dari Mac ada, lalu mengunggah bundle dan menggabungkan
-entrinya ke `latest.json` rilis itu (`latest-json.mjs --merge`, tanda tangan
-diverifikasi). Untuk tag yang sudah ada: Actions → Release (Linux, Windows)
-→ Run workflow, isi tag; atau `gh workflow run release.yml -f tag=vX.Y.Z`.
+Workflow `Release` jalan saat tag `v*` di-push: membangun `.app`/`.dmg`
+universal (macos-14; kalau langkah DMG Tauri gagal karena Finder, DMG dibuat
+dengan `hdiutil`), AppImage/deb/rpm (ubuntu-22.04) dan installer NSIS
+(windows-latest), menandatangani bundle update dengan secret repo
+`TAURI_SIGNING_PRIVATE_KEY`, lalu job `publish` membuat `latest.json`
+(`latest-json.mjs`, tanda tangan diverifikasi) dan `SHA256SUMS`, dan membuat
+rilis dengan catatan dari pesan tag beranotasi. Kalau rilisnya sudah ada
+(jalankan ulang), file dan catatannya diganti. Untuk tag yang sudah ada:
+Actions → Release → Run workflow, isi tag; atau
+`gh workflow run release.yml -f tag=vX.Y.Z`.
 
 Secret `TAURI_SIGNING_PRIVATE_KEY` berisi kunci updater (isi file, bukan
 path). Mengganti kunci berarti memperbarui secret ini dan `pubkey`.
@@ -116,7 +118,7 @@ sama di Mac sebelum publikasi.
   Docker `jenderalcode-cache`, bersama cache cargo dan npm). Installer NSIS mengunduh WebView2 saat
   instalasi bila belum ada.
 
-## 3. macOS (di Mac)
+## 3. Cadangan: macOS di Mac
 
 ```bash
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -161,18 +163,22 @@ Windows juga belum ditandatangani (SmartScreen akan memperingatkan).
 
 ## 4. Publikasi
 
-1. Kumpulkan semua artefak (termasuk `.sig`) di `dist-release/X.Y.Z/`.
+1. (Hanya untuk jalur cadangan) kumpulkan semua artefak (termasuk `.sig`)
+   di `dist-release/X.Y.Z/`.
 2. Uji minimal: app terbuka, bisa membuka workspace, dan satu chat dengan
    provider mock/nyata berjalan, di tiap OS yang tersedia.
-3. Tulis catatan rilis (ditampilkan apa adanya di dialog update app), lalu
-   (bundle Linux dan Windows menyusul dari GitHub Actions):
+3. Tulis catatan rilis (ditampilkan apa adanya di dialog update app), lalu:
    ```bash
-   scripts/release/publish.sh <catatan.md>
+   scripts/release/tag.sh <catatan.md>
    ```
-   Skrip ini membuat `latest.json` (`scripts/release/latest-json.mjs`),
-   membuat dan mem-push tag `vX.Y.Z`, lalu `gh release create` dengan semua
-   artefak dan `latest.json`. Rilis harus berstatus *latest* (bukan draft
-   atau prerelease), karena app membaca `releases/latest`.
+   Skrip ini membuat tag beranotasi `vX.Y.Z` berisi catatan itu dan mem-push
+   `main` serta tag; GitHub Actions membangun semuanya dan menerbitkan rilis
+   (sekitar 20-30 menit, pantau dengan `gh run watch`). Rilis harus
+   berstatus *latest* (bukan draft atau prerelease), karena app membaca
+   `releases/latest`; workflow memberi `--latest`.
+   Cadangan dengan build Mac lokal: `scripts/release/build-macos.sh` lalu
+   `scripts/release/publish.sh <catatan.md>` (tag yang di-push tetap
+   menjalankan workflow, yang lalu mengganti file rilis dan `latest.json`).
    Push dan publikasi rilis adalah aksi keluar: agen harus minta persetujuan
    maintainer dulu.
 4. Cek: `curl -sL https://github.com/<owner>/<repo>/releases/latest/download/latest.json`
