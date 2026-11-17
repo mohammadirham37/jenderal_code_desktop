@@ -10,7 +10,7 @@ Detail mesin build disimpan di catatan pribadi maintainer, bukan di repo.
 
 | OS | Bundle | Dibangun di |
 |----|--------|-------------|
-| macOS (Apple Silicon + Intel) | `.app`, `.dmg` (universal) | GitHub Actions `macos-14` (cadangan: Mac) |
+| macOS (Apple Silicon + Intel) | `.app`, `.dmg` (universal) | GitHub Actions `macos-latest` (cadangan: Mac) |
 | Linux x86_64 | `.deb`, `.rpm`, `.AppImage` | GitHub Actions (cadangan: Docker) |
 | Windows x86_64 | installer NSIS `.exe` | GitHub Actions (cadangan: Docker, cross-compile `cargo-xwin`) |
 
@@ -70,7 +70,7 @@ cocok dengan `pubkey` di `tauri.conf.json`.
 ## 2. Build: GitHub Actions
 
 Workflow `Release` jalan saat tag `v*` di-push: membangun `.app`/`.dmg`
-universal (macos-14; kalau langkah DMG Tauri gagal karena Finder, DMG dibuat
+universal (macos-latest; kalau langkah DMG Tauri gagal karena Finder, DMG dibuat
 dengan `hdiutil`), AppImage/deb/rpm (ubuntu-22.04) dan installer NSIS
 (windows-latest), menandatangani bundle update dengan secret repo
 `TAURI_SIGNING_PRIVATE_KEY`, lalu job `publish` membuat `latest.json`

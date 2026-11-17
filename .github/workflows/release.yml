@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-latest
             bundles: app,dmg
             target: universal-apple-darwin
           - os: ubuntu-22.04
