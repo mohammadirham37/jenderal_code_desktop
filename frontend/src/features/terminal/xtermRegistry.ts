@@ -89,15 +89,13 @@ new MutationObserver(() => {
 function monoFamily(): string {
   return (
     getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() ||
-    '"IBM Plex Mono", ui-monospace, monospace'
+    "ui-monospace, Menlo, Consolas, monospace"
   );
 }
 
-/** Web fonts load lazily; measuring before they arrive sizes cells for the
- *  fallback font. */
-const fontsReady: Promise<unknown> = Promise.all(
-  ["400", "600"].map((w) => document.fonts.load(`${w} 12px "IBM Plex Mono"`)),
-).catch(() => {});
+/** System fonts need no download; waiting for the document's fonts keeps
+ *  cell measuring correct should any font still be loading. */
+const fontsReady: Promise<unknown> = document.fonts.ready.catch(() => {});
 
 function listen(): Promise<unknown> {
   listening ??= Promise.all([
