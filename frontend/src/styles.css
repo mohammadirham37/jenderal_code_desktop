@@ -46,6 +46,15 @@
   --animate-fade: fade 260ms ease-out both;
 }
 
+/* Linux (WebKitGTK): fontconfig answers every family name, so a stack that
+   starts with fonts the system lacks (ui-monospace, SF Mono, …) can end up
+   taking digits from the colour emoji font, which renders them tiny. Start
+   with families Linux desktops actually ship. `os-linux` is set in main.tsx. */
+html.os-linux {
+  --font-sans: "Ubuntu Sans", Ubuntu, Cantarell, "Noto Sans", "DejaVu Sans", "Liberation Sans", sans-serif;
+  --font-mono: "Ubuntu Sans Mono", "Ubuntu Mono", "DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", monospace;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
